@@ -521,8 +521,11 @@ function showStockDetail(tsCode, name) {
   els.klineChart.innerHTML = "";
   els.detailMeta.textContent = "获取数据中…";
 
-  fetch(`api/kline?ts_code=${encodeURIComponent(tsCode)}&limit=120`)
-    .then((r) => r.json())
+  fetch(`/api/kline?ts_code=${encodeURIComponent(tsCode)}&limit=120`)
+    .then((r) => {
+      if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+      return r.json();
+    })
     .then((data) => {
       els.detailLoading.hidden = true;
       if (data.error) {
@@ -537,7 +540,7 @@ function showStockDetail(tsCode, name) {
     .catch((err) => {
       els.detailLoading.hidden = true;
       els.detailError.hidden = false;
-      els.detailError.textContent = err.message || "请求失败";
+      els.detailError.textContent = `请求失败: ${err.message}。请确认使用了 h5_server.py 启动服务（uv run python h5_server.py）。`;
     });
 }
 
