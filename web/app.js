@@ -164,6 +164,10 @@ function setError(error) {
   els.emptyState.textContent = error.message || "读取失败";
 }
 
+function isEmptyData(payload) {
+  return !payload || !payload.columns || !Array.isArray(payload.columns) || payload.columns.length === 0;
+}
+
 function syncDates(payload) {
   state.dates = payload.dates || state.dates;
   state.latestDate = payload.latest_date || state.latestDate;
@@ -608,9 +612,19 @@ async function loadDate(date) {
   try {
     const entry = state.dates.find((item) => item.date === date);
     if (!entry) {
-      throw new Error(`日期 ${date} 不存在`);
+      throw new Error(`日期 ${displayDate(date)} 暂无数据`);
     }
     const payload = await fetchJson(entry.file || `data/dates/${date}.json`);
+    if (isEmptyData(payload)) {
+      els.summaryTitle.textContent = displayDate(date);
+      els.summaryMeta.textContent = "该日期无股票数据";
+      els.tableHead.innerHTML = "";
+      els.tableBody.innerHTML = "";
+      els.mobileList.innerHTML = "";
+      els.emptyState.hidden = false;
+      els.emptyState.textContent = "该日期没有匹配的股票数据";
+      return;
+    }
     renderData({
       ...payload,
       dates: state.dates,
@@ -658,14 +672,17 @@ async function init() {
   try {
     const payload = await fetchJson("data/manifest.json");
     state.manifest = payload;
-    syncDates(payload);
-    if (!payload.latest_date) {
-      els.subtitle.textContent = "data 下暂无 CSV";
+    
+    if (!payload.latest_date || !payload.dates || payload.dates.length === 0) {
+      els.subtitle.textContent = "请先生成数据，在项目根目录运行：python export_web_data.py";
       els.summaryTitle.textContent = "暂无数据";
-      els.summaryMeta.textContent = "";
+      els.summaryMeta.textContent = "运行 export_web_data.py 生成数据后再刷新页面";
       els.emptyState.hidden = false;
+      els.emptyState.textContent = "尚未生成数据文件，请运行数据导出命令";
       return;
     }
+    
+    syncDates(payload);
     await Promise.all([loadDate(payload.latest_date), loadIndustryTrends()]);
   } catch (error) {
     setError(error);
