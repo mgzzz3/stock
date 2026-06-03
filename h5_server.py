@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sqlite3
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,6 +25,7 @@ from urllib.parse import parse_qs, urlparse
 import pandas as pd
 
 from search_stock_csv import order_columns, read_csv, relative_path, search_csvs
+from store.db import connect as db_connect, DB_PATH
 
 
 ROOT = Path(__file__).resolve().parent
@@ -116,6 +118,10 @@ class H5Handler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             self.send_json(self.handle_search(params))
             return
+        if parsed.path == "/api/kline":
+            params = parse_qs(parsed.query)
+            self.send_json(self.handle_kline(params))
+            return
         if parsed.path == "/":
             self.path = "/index.html"
         super().do_GET()
@@ -189,6 +195,45 @@ class H5Handler(SimpleHTTPRequestHandler):
             }
         )
         return payload, HTTPStatus.OK
+
+    def handle_kline(self, params: dict[str, list[str]]) -> dict:
+        ts_code = params.get("ts_code", [None])[0]
+        limit = int(params.get("limit", ["120"])[0])
+
+        if not ts_code:
+            return {"error": "ts_code parameter is required"}, HTTPStatus.BAD_REQUEST
+
+        try:
+            with db_connect() as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """SELECT trade_date, open, high, low, close, pre_close, vol, amount
+                       FROM daily
+                       WHERE ts_code = ?
+                       ORDER BY trade_date DESC
+                       LIMIT ?""",
+                    (ts_code, limit),
+                ).fetchall()
+
+                if not rows:
+                    return {"error": f"No data for {ts_code}"}, HTTPStatus.NOT_FOUND
+
+                # Also get stock name
+                name_row = conn.execute(
+                    "SELECT name FROM stock_basic WHERE ts_code = ?", (ts_code,)
+                ).fetchone()
+
+            items = [dict(r) for r in reversed(rows)]
+
+            return {
+                "ts_code": ts_code,
+                "name": name_row["name"] if name_row else "",
+                "count": len(items),
+                "kline": items,
+            }, HTTPStatus.OK
+
+        except Exception as e:
+            return {"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR
 
     def send_json(
         self,

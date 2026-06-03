@@ -34,6 +34,16 @@ const els = {
   removedIndustryMeta: document.querySelector("#removedIndustryMeta"),
   removedIndustryList: document.querySelector("#removedIndustryList"),
   industryTableBody: document.querySelector("#industryTableBody"),
+  detailPanel: document.querySelector("#detailPanel"),
+  listPanel: document.querySelector("#listPanel"),
+  detailBack: document.querySelector("#detailBack"),
+  detailName: document.querySelector("#detailName"),
+  detailCode: document.querySelector("#detailCode"),
+  detailMeta: document.querySelector("#detailMeta"),
+  klineChart: document.querySelector("#klineChart"),
+  detailLoading: document.querySelector("#detailLoading"),
+  detailError: document.querySelector("#detailError"),
+  industryPanel: document.querySelector(".industry-panel"),
 };
 
 const primaryColumns = [
@@ -489,6 +499,225 @@ async function loadIndustryTrends() {
   }
 }
 
+/* ── Stock Detail / K-line ── */
+
+function getTsCode(row, columns) {
+  const codeCol = columns.find((c) => isCodeColumn(c));
+  if (!codeCol) return "";
+  const raw = String(row[codeCol] ?? "").trim();
+  // Normalize to ts_code format (e.g. 000001.SZ, 600000.SH)
+  if (raw.includes(".")) return raw.toUpperCase();
+  if (/^\d{6}$/.test(raw)) return raw; // fallback, server will try DB lookup
+  return raw;
+}
+
+function showStockDetail(tsCode, name) {
+  els.listPanel.hidden = true;
+  els.detailPanel.hidden = false;
+  els.detailName.textContent = name || "--";
+  els.detailCode.textContent = tsCode;
+  els.detailLoading.hidden = false;
+  els.detailError.hidden = true;
+  els.klineChart.innerHTML = "";
+  els.detailMeta.textContent = "获取数据中…";
+
+  fetch(`api/kline?ts_code=${encodeURIComponent(tsCode)}&limit=120`)
+    .then((r) => r.json())
+    .then((data) => {
+      els.detailLoading.hidden = true;
+      if (data.error) {
+        els.detailError.hidden = false;
+        els.detailError.textContent = data.error;
+        return;
+      }
+      els.detailName.textContent = data.name || name || "--";
+      els.detailMeta.textContent = `${data.count} 个交易日`;
+      renderKlineChart(data.kline, data.name || tsCode);
+    })
+    .catch((err) => {
+      els.detailLoading.hidden = true;
+      els.detailError.hidden = false;
+      els.detailError.textContent = err.message || "请求失败";
+    });
+}
+
+function backToList() {
+  els.detailPanel.hidden = true;
+  els.listPanel.hidden = false;
+}
+
+els.detailBack.addEventListener("click", backToList);
+
+/* ── Candlestick Chart (SVG) ── */
+
+function renderKlineChart(kline, stockLabel) {
+  const svg = els.klineChart;
+  svg.innerHTML = "";
+
+  if (!kline || kline.length < 2) {
+    const t = svgNode("text", { x: 400, y: 200, "text-anchor": "middle", class: "kline-label" });
+    t.textContent = "K线数据不足";
+    svg.append(t);
+    return;
+  }
+
+  const width = 800;
+  const height = 400;
+  const pad = { left: 48, right: 16, top: 28, bottom: 28 };
+  const volHeight = 50;
+  const mainHeight = height - pad.top - pad.bottom - volHeight - 8;
+  const plotW = width - pad.left - pad.right;
+
+  const opens = kline.map((d) => Number(d.open));
+  const highs = kline.map((d) => Number(d.high));
+  const lows = kline.map((d) => Number(d.low));
+  const closes = kline.map((d) => Number(d.close));
+  const volumes = kline.map((d) => Number(d.vol || 0));
+  const dates = kline.map((d) => d.trade_date || "");
+
+  // Price range
+  let minPrice = Math.min(...lows);
+  let maxPrice = Math.max(...highs);
+  const padPrice = (maxPrice - minPrice) * 0.08 || 0.5;
+  minPrice -= padPrice;
+  maxPrice += padPrice;
+
+  // Volume range
+  const maxVol = Math.max(...volumes, 1);
+
+  const xFor = (i) => pad.left + (plotW * i) / (kline.length - 1);
+  const yFor = (p) => pad.top + mainHeight - ((p - minPrice) / (maxPrice - minPrice)) * mainHeight;
+  const volYFor = (v) => pad.top + mainHeight + 8 + volHeight - (v / maxVol) * volHeight;
+
+  const candleWidth = Math.max(2, Math.min(10, plotW / kline.length * 0.6));
+  const halfCandle = candleWidth / 2;
+
+  // Grid lines
+  const gridCount = 5;
+  for (let i = 0; i <= gridCount; i++) {
+    const y = pad.top + (mainHeight * i) / gridCount;
+    svg.append(svgNode("line", { x1: pad.left, y1: y, x2: width - pad.right, y2: y, class: "kline-grid" }));
+    const label = svgNode("text", { x: pad.left - 6, y: y + 4, "text-anchor": "end", class: "kline-label" });
+    const p = maxPrice - ((maxPrice - minPrice) * i) / gridCount;
+    label.textContent = p.toFixed(2);
+    svg.append(label);
+  }
+
+  // Date labels (every ~20 bars)
+  const step = Math.max(1, Math.floor(kline.length / 8));
+  for (let i = 0; i < kline.length; i += step) {
+    const x = xFor(i);
+    const label = svgNode("text", { x, y: height - 6, "text-anchor": "middle", class: "kline-label" });
+    label.textContent = displayDate(dates[i]).slice(5);
+    svg.append(label);
+  }
+
+  // Volume labels
+  for (let i = 0; i <= 2; i++) {
+    const y = pad.top + mainHeight + 8 + (volHeight * i) / 2;
+    const label = svgNode("text", { x: pad.left - 6, y: y + 4, "text-anchor": "end", class: "kline-label" });
+    label.textContent = i === 0 ? "0" : Math.round((maxVol * i) / 2 / 10000) + "万";
+    svg.append(label);
+  }
+
+  // Volume bar area separator
+  svg.append(svgNode("line", { x1: pad.left, y1: pad.top + mainHeight + 8, x2: width - pad.right, y2: pad.top + mainHeight + 8, class: "kline-grid" }));
+
+  // Calculate MAs
+  function ma(data, period) {
+    return data.map((_, i) => {
+      if (i < period - 1) return NaN;
+      let sum = 0;
+      for (let j = 0; j < period; j++) sum += data[i - j];
+      return sum / period;
+    });
+  }
+
+  function renderMA(series, className) {
+    const valid = [];
+    series.forEach((v, i) => {
+      if (!isNaN(v)) valid.push({ x: xFor(i), y: yFor(v) });
+    });
+    if (valid.length < 2) return;
+    const d = valid.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+    svg.append(svgNode("path", { d, class: className }));
+  }
+
+  const ma5 = ma(closes, 5);
+  const ma10 = ma(closes, 10);
+  const ma20 = ma(closes, 20);
+  renderMA(ma5, "kline-ma5");
+  renderMA(ma10, "kline-ma10");
+  renderMA(ma20, "kline-ma20");
+
+  // Candles
+  for (let i = 0; i < kline.length; i++) {
+    const x = xFor(i);
+    const o = opens[i];
+    const c = closes[i];
+    const h = highs[i];
+    const l = lows[i];
+    const vol = volumes[i];
+
+    const isUp = c >= o;
+    const colorClass = isUp ? "kline-candle-up" : "kline-candle-down";
+
+    // Wick
+    const wickY1 = yFor(h);
+    const wickY2 = yFor(l);
+    svg.append(svgNode("line", { x1: x, y1: wickY1, x2: x, y2: wickY2, class: `kline-wick ${colorClass}` }));
+
+    // Candle body
+    const bodyY1 = yFor(Math.max(o, c));
+    const bodyY2 = yFor(Math.min(o, c));
+    const bodyH = Math.max(1, bodyY2 - bodyY1);
+    svg.append(svgNode("rect", { x: x - halfCandle, y: bodyY1, width: candleWidth, height: bodyH, class: `kline-candle-body ${colorClass}` }));
+
+    // Volume bar
+    const volBarH = volYFor(vol) - (pad.top + mainHeight + 8);
+    svg.append(svgNode("rect", {
+      x: x - halfCandle,
+      y: pad.top + mainHeight + 8 + volHeight - volBarH,
+      width: candleWidth,
+      height: Math.max(1, volBarH),
+      class: `kline-vol ${colorClass}`,
+    }));
+  }
+
+  // Legend
+  const legendG = svgNode("g", { transform: "translate(" + (width - 160) + ", 8)" });
+  const legendItems = [
+    { label: "MA5", color: "#3498db" },
+    { label: "MA10", color: "#e67e22" },
+    { label: "MA20", color: "#9b59b6" },
+  ];
+  legendItems.forEach((item, idx) => {
+    const lx = idx * 52;
+    const line = svgNode("line", { x1: lx, y1: 6, x2: lx + 14, y2: 6, stroke: item.color, "stroke-width": 2 });
+    const text = svgNode("text", { x: lx + 18, y: 10, class: "kline-label" });
+    text.textContent = item.label;
+    legendG.append(line, text);
+  });
+  svg.append(legendG);
+
+  // Price label at last candle
+  const lastIdx = kline.length - 1;
+  const lastPrice = closes[lastIdx];
+  const lastX = xFor(lastIdx);
+  const lastY = yFor(lastPrice);
+
+  const priceLabel = svgNode("text", {
+    x: lastX + 6,
+    y: lastY - 4,
+    class: "kline-label",
+    "font-weight": "bold",
+  });
+  priceLabel.textContent = lastPrice.toFixed(2);
+  svg.append(priceLabel);
+}
+
+/* ── Table Rendering ── */
+
 function renderTable(columns, rows) {
   els.tableHead.innerHTML = "";
   els.tableBody.innerHTML = "";
@@ -504,6 +733,11 @@ function renderTable(columns, rows) {
 
   for (const row of rows) {
     const rowEl = document.createElement("tr");
+    rowEl.style.cursor = "pointer";
+    rowEl.addEventListener("click", () => {
+      const tsCode = getTsCode(row, columns);
+      if (tsCode) showStockDetail(tsCode, row.name || row.stock_name || row["股票名称"] || tsCode);
+    });
     for (const column of columns) {
       const td = document.createElement("td");
       td.dataset.col = column;
@@ -528,6 +762,11 @@ function renderMobile(columns, rows) {
   for (const row of rows) {
     const card = document.createElement("article");
     card.className = "stock-card";
+    card.style.cursor = "pointer";
+    const tsCode = getTsCode(row, columns);
+    card.addEventListener("click", () => {
+      if (tsCode) showStockDetail(tsCode, row.name || row.stock_name || row["股票名称"] || tsCode);
+    });
 
     const code = firstValue(row, ["ts_code", "code", "stock_code", "证券代码", "股票代码"]);
     const name = firstValue(row, ["name", "stock_name", "股票名称", "股票简称", "证券简称"]) || code || "--";

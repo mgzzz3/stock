@@ -569,6 +569,154 @@ td[data-col="bull_bear"] {
   font-size: 13px;
 }
 
+.detail-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.detail-back {
+  height: 36px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--text);
+  padding: 0 14px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.detail-back:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.detail-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.detail-title strong {
+  font-size: 20px;
+}
+
+.detail-title span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.detail-meta {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
+.detail-chart-wrap {
+  width: 100%;
+  overflow: hidden;
+}
+
+#klineChart {
+  display: block;
+  width: 100%;
+  height: 400px;
+}
+
+.detail-loading {
+  display: grid;
+  min-height: 200px;
+  place-items: center;
+  color: var(--muted);
+}
+
+.detail-error {
+  display: grid;
+  min-height: 200px;
+  place-items: center;
+  color: var(--danger);
+}
+
+.kline-candle-up {
+  fill: #e74c3c;
+  stroke: #e74c3c;
+}
+
+.kline-candle-down {
+  fill: #2ecc71;
+  stroke: #2ecc71;
+}
+
+.kline-wick {
+  stroke-width: 1;
+}
+
+.kline-candle-body {
+  stroke-width: 1;
+}
+
+.kline-ma5 {
+  fill: none;
+  stroke: #3498db;
+  stroke-width: 1.5;
+}
+
+.kline-ma10 {
+  fill: none;
+  stroke: #e67e22;
+  stroke-width: 1.5;
+}
+
+.kline-ma20 {
+  fill: none;
+  stroke: #9b59b6;
+  stroke-width: 1.5;
+}
+
+.kline-vol {
+  fill-opacity: 0.5;
+}
+
+.kline-label {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.kline-grid {
+  stroke: var(--line);
+  stroke-width: 0.5;
+}
+
+@media (max-width: 760px) {
+  .detail-panel {
+    padding: 12px;
+  }
+
+  .detail-header {
+    flex-wrap: wrap;
+  }
+
+  .detail-meta {
+    margin-left: 0;
+    width: 100%;
+    text-align: left;
+  }
+
+  #klineChart {
+    height: 340px;
+  }
+}
+
 .empty {
   display: grid;
   min-height: 220px;
