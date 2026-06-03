@@ -283,13 +283,19 @@ h1 {
 
 .chart-axis,
 .chart-grid-line {
-  stroke: var(--line);
+  stroke: var(--line-strong);
   stroke-width: 1;
+}
+
+.chart-grid-line {
+  stroke-dasharray: 4, 3;
+  stroke-width: 0.8;
 }
 
 .chart-label {
   fill: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
+  font-family: inherit;
 }
 
 .chart-line {
@@ -297,17 +303,60 @@ h1 {
   stroke-width: 2.5;
   stroke-linecap: round;
   stroke-linejoin: round;
+  transition: opacity 0.2s ease;
+}
+
+.chart-area {
+  pointer-events: none;
+}
+
+.chart-dot {
+  transition: opacity 0.2s ease;
 }
 
 .chart-point {
   stroke: #fff;
   stroke-width: 1.5;
+  transition: opacity 0.2s ease;
+}
+
+.chart-point-inner {
+  transition: opacity 0.2s ease;
+}
+
+.chart-tooltip-overlay {
+  cursor: crosshair;
+}
+
+.chart-tooltip-line {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 3, 2;
+  pointer-events: none;
+}
+
+.chart-tooltip-date {
+  fill: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: inherit;
+  pointer-events: none;
+  dominant-baseline: hanging;
+}
+
+.chart-tooltip-dot {
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.chart-tooltip-dots {
+  pointer-events: none;
 }
 
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 6px 10px;
   margin-top: 10px;
 }
 
