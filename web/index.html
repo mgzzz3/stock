@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A 股信号浏览</title>
+    <link rel="stylesheet" href="styles.css?v=industry-2" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="toolbar" aria-label="股票信号筛选">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">A</div>
+          <div>
+            <h1>A 股信号浏览</h1>
+            <p id="subtitle">加载中</p>
+          </div>
+        </div>
+
+        <form class="search" id="searchForm">
+          <label class="sr-only" for="searchInput">股票名称或代码</label>
+          <input
+            id="searchInput"
+            name="q"
+            type="search"
+            inputmode="search"
+            autocomplete="off"
+            placeholder="股票名称 / 代码"
+          />
+          <button type="submit">搜索</button>
+          <button class="icon-button" id="clearSearch" type="button" title="清空搜索" aria-label="清空搜索">
+            ×
+          </button>
+        </form>
+      </section>
+
+      <nav class="date-tabs" id="dateTabs" aria-label="可选日期"></nav>
+
+      <section class="summary" aria-live="polite">
+        <div>
+          <span class="summary-label" id="modeLabel">日期</span>
+          <strong id="summaryTitle">--</strong>
+        </div>
+        <div class="summary-meta" id="summaryMeta">--</div>
+      </section>
+
+      <section class="industry-panel" aria-label="行业板块趋势">
+        <div class="section-head">
+          <div>
+            <h2>行业板块</h2>
+            <p id="industrySubtitle">加载中</p>
+          </div>
+          <div class="section-stat" id="industryStat">--</div>
+        </div>
+
+        <div class="industry-grid">
+          <div class="chart-box">
+            <div class="chart-head">
+              <strong>多日股票数变化</strong>
+              <span id="industryChartMeta">--</span>
+            </div>
+            <div class="chart-wrap">
+              <svg id="industryChart" viewBox="0 0 720 260" role="img" aria-label="行业股票数多日变化曲线"></svg>
+            </div>
+            <div class="chart-legend" id="industryLegend"></div>
+          </div>
+
+          <div class="new-industry">
+            <div class="chart-head">
+              <strong>板块变化</strong>
+              <span id="industryChangeMeta">--</span>
+            </div>
+            <div class="industry-change-group">
+              <div class="industry-change-title">
+                <strong>新进板块</strong>
+                <span id="newIndustryMeta">--</span>
+              </div>
+              <div class="new-industry-list" id="newIndustryList"></div>
+            </div>
+            <div class="industry-change-group">
+              <div class="industry-change-title">
+                <strong>消失板块</strong>
+                <span id="removedIndustryMeta">--</span>
+              </div>
+              <div class="new-industry-list" id="removedIndustryList"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="industry-table-wrap">
+          <table class="industry-table">
+            <thead>
+              <tr>
+                <th>行业</th>
+                <th>最新数量</th>
+                <th>较上一日</th>
+                <th>首次出现</th>
+              </tr>
+            </thead>
+            <tbody id="industryTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="list-panel">
+        <div class="table-wrap">
+          <table id="stockTable">
+            <thead id="tableHead"></thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+        <div class="mobile-list" id="mobileList"></div>
+        <div class="empty" id="emptyState" hidden>没有匹配的数据</div>
+      </section>
+    </main>
+
+    <script src="app.js?v=industry-2" defer></script>
+  </body>
+</html>
