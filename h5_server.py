@@ -9,6 +9,7 @@ This server still exposes a small legacy JSON API for local debugging:
     GET /api/dates
     GET /api/stocks?date=YYYYMMDD
     GET /api/search?q=301297
+    GET /api/kline?ts_code=301297.SZ
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ ROOT = Path(__file__).resolve().parent
 WEB_DIR = ROOT / "web"
 DATA_DIR = ROOT / "data"
 DATE_RE = re.compile(r"(?<!\d)(20\d{6})(?!\d)")
+SYMBOL_RE = re.compile(r"^\d{6}$")
 
 
 def parse_args() -> argparse.Namespace:
@@ -97,6 +99,41 @@ def frame_payload(df: pd.DataFrame) -> dict[str, object]:
         "columns": list(safe_df.columns),
         "rows": safe_df.to_dict(orient="records"),
     }
+
+
+def infer_ts_code(symbol: str) -> str | None:
+    if not SYMBOL_RE.match(symbol):
+        return None
+    if symbol.startswith(("60", "68", "90")):
+        return f"{symbol}.SH"
+    if symbol.startswith(("00", "30", "20")):
+        return f"{symbol}.SZ"
+    if symbol.startswith(("43", "83", "87", "88", "92")):
+        return f"{symbol}.BJ"
+    return None
+
+
+def resolve_ts_code(conn: sqlite3.Connection, raw_code: str) -> str:
+    code = raw_code.strip().upper()
+    if not code:
+        return code
+
+    if "." in code:
+        return code
+
+    if SYMBOL_RE.match(code):
+        row = conn.execute(
+            "SELECT ts_code FROM stock_basic WHERE symbol = ? ORDER BY ts_code LIMIT 1",
+            (code,),
+        ).fetchone()
+        if row:
+            return row["ts_code"]
+
+        inferred = infer_ts_code(code)
+        if inferred:
+            return inferred
+
+    return code
 
 
 class H5Handler(SimpleHTTPRequestHandler):
@@ -206,6 +243,7 @@ class H5Handler(SimpleHTTPRequestHandler):
         try:
             with db_connect() as conn:
                 conn.row_factory = sqlite3.Row
+                ts_code = resolve_ts_code(conn, ts_code)
                 rows = conn.execute(
                     """SELECT trade_date, open, high, low, close, pre_close, vol, amount
                        FROM daily

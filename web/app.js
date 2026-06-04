@@ -148,7 +148,15 @@ function displayDate(date) {
 
 async function fetchJson(url) {
   const response = await fetch(url);
-  const data = await response.json();
+  let data;
+  try {
+    data = await response.json();
+  } catch (error) {
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    throw error;
+  }
   if (!response.ok) {
     throw new Error(data.error || `Request failed: ${response.status}`);
   }
@@ -511,8 +519,48 @@ function getTsCode(row, columns) {
   return raw;
 }
 
+function klineLookupKeys(tsCode) {
+  const value = String(tsCode || "").trim().toUpperCase();
+  if (!value) return [];
+  const keys = [value];
+  if (value.includes(".")) {
+    keys.push(value.split(".")[0]);
+  }
+  return [...new Set(keys)];
+}
+
+function staticKlinePath(tsCode) {
+  const index = state.manifest?.kline_index || {};
+  for (const key of klineLookupKeys(tsCode)) {
+    if (index[key]) {
+      return index[key];
+    }
+  }
+  return "";
+}
+
+async function loadStockDetailData(tsCode) {
+  const staticPath = staticKlinePath(tsCode);
+  if (staticPath) {
+    try {
+      return await fetchJson(staticPath);
+    } catch (error) {
+      // Fall back to the local preview API below when static detail data is stale or missing.
+    }
+  }
+
+  return fetchJson(`/api/kline?ts_code=${encodeURIComponent(tsCode)}&limit=120`);
+}
+
+function showListView() {
+  els.detailPanel.hidden = true;
+  els.listPanel.hidden = false;
+  els.industryPanel.hidden = false;
+}
+
 function showStockDetail(tsCode, name) {
   els.listPanel.hidden = true;
+  els.industryPanel.hidden = true;
   els.detailPanel.hidden = false;
   els.detailName.textContent = name || "--";
   els.detailCode.textContent = tsCode;
@@ -521,11 +569,7 @@ function showStockDetail(tsCode, name) {
   els.klineChart.innerHTML = "";
   els.detailMeta.textContent = "获取数据中…";
 
-  fetch(`/api/kline?ts_code=${encodeURIComponent(tsCode)}&limit=120`)
-    .then((r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
-      return r.json();
-    })
+  loadStockDetailData(tsCode)
     .then((data) => {
       els.detailLoading.hidden = true;
       if (data.error) {
@@ -540,13 +584,12 @@ function showStockDetail(tsCode, name) {
     .catch((err) => {
       els.detailLoading.hidden = true;
       els.detailError.hidden = false;
-      els.detailError.textContent = `请求失败: ${err.message}。请确认使用了 h5_server.py 启动服务（uv run python h5_server.py）。`;
+      els.detailError.textContent = `请求失败: ${err.message}。请重新运行 export_web_data.py 导出详情数据；本地预览也可以使用 h5_server.py 启动服务。`;
     });
 }
 
 function backToList() {
-  els.detailPanel.hidden = true;
-  els.listPanel.hidden = false;
+  showListView();
 }
 
 els.detailBack.addEventListener("click", backToList);
@@ -677,10 +720,12 @@ function renderKlineChart(kline, stockLabel) {
     svg.append(svgNode("rect", { x: x - halfCandle, y: bodyY1, width: candleWidth, height: bodyH, class: `kline-candle-body ${colorClass}` }));
 
     // Volume bar
-    const volBarH = volYFor(vol) - (pad.top + mainHeight + 8);
+    const volBaseY = pad.top + mainHeight + 8 + volHeight;
+    const volTopY = volYFor(vol);
+    const volBarH = volBaseY - volTopY;
     svg.append(svgNode("rect", {
       x: x - halfCandle,
-      y: pad.top + mainHeight + 8 + volHeight - volBarH,
+      y: volTopY,
       width: candleWidth,
       height: Math.max(1, volBarH),
       class: `kline-vol ${colorClass}`,
@@ -817,6 +862,7 @@ function renderMobile(columns, rows) {
 }
 
 function renderData(payload) {
+  showListView();
   syncDates(payload);
   state.mode = payload.mode || state.mode;
   state.columns = orderedColumns(payload.columns || []);

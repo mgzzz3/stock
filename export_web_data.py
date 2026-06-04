@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -27,13 +29,34 @@ from search_stock_csv import order_columns, read_csv, relative_path
 ROOT = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = ROOT / "data"
 DEFAULT_OUTPUT_DIR = ROOT / "web" / "data"
+DEFAULT_DB_PATH = ROOT / "data" / "stock.db"
 DATE_RE = re.compile(r"(?<!\d)(20\d{6})(?!\d)")
+CODE_COLUMNS = (
+    "ts_code",
+    "code",
+    "symbol",
+    "stock_code",
+    "seccode",
+    "security_code",
+    "ticker",
+    "股票代码",
+    "证券代码",
+)
+TS_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$", re.IGNORECASE)
+SYMBOL_RE = re.compile(r"^\d{6}$")
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export web/static JSON data.")
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR, type=Path)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, type=Path)
+    parser.add_argument(
+        "--db-path",
+        default=Path(os.environ.get("STOCK_DB_PATH", DEFAULT_DB_PATH)),
+        type=Path,
+        help="SQLite database used to export static K-line detail data.",
+    )
+    parser.add_argument("--kline-limit", default=120, type=int)
     return parser.parse_args()
 
 
@@ -78,6 +101,118 @@ def combine_files(paths: list[Path]) -> pd.DataFrame:
         return pd.DataFrame()
 
     return order_columns(pd.concat(frames, ignore_index=True, sort=False))
+
+
+def infer_ts_code(symbol: str) -> str | None:
+    if not SYMBOL_RE.match(symbol):
+        return None
+    if symbol.startswith(("60", "68", "90")):
+        return f"{symbol}.SH"
+    if symbol.startswith(("00", "30", "20")):
+        return f"{symbol}.SZ"
+    if symbol.startswith(("43", "83", "87", "88", "92")):
+        return f"{symbol}.BJ"
+    return None
+
+
+def collect_code_values(df: pd.DataFrame) -> set[str]:
+    values: set[str] = set()
+    if df.empty:
+        return values
+
+    normalized_columns = {column.lower().replace("_", ""): column for column in df.columns}
+    for candidate in CODE_COLUMNS:
+        column = candidate if candidate in df.columns else normalized_columns.get(candidate.lower().replace("_", ""))
+        if not column:
+            continue
+        for value in df[column].dropna().astype(str):
+            code = value.strip().upper()
+            if code:
+                values.add(code)
+    return values
+
+
+def resolve_export_codes(code_values: set[str], db_path: Path) -> set[str]:
+    resolved = {code for code in code_values if TS_CODE_RE.match(code)}
+    symbols = {code for code in code_values if SYMBOL_RE.match(code)}
+    if not symbols:
+        return resolved
+
+    if db_path.exists():
+        with sqlite3.connect(db_path) as conn:
+            symbol_list = sorted(symbols)
+            for start in range(0, len(symbol_list), 500):
+                chunk = symbol_list[start : start + 500]
+                rows = conn.execute(
+                    f"SELECT symbol, ts_code FROM stock_basic WHERE symbol IN ({','.join('?' for _ in chunk)})",
+                    chunk,
+                ).fetchall()
+                for symbol, ts_code in rows:
+                    if ts_code:
+                        resolved.add(str(ts_code).upper())
+                        symbols.discard(str(symbol))
+
+    for symbol in symbols:
+        inferred = infer_ts_code(symbol)
+        if inferred:
+            resolved.add(inferred)
+    return resolved
+
+
+def export_kline_data(
+    ts_codes: set[str],
+    db_path: Path,
+    output_dir: Path,
+    limit: int,
+    generated_at: str,
+) -> dict[str, str]:
+    if not ts_codes or not db_path.exists():
+        return {}
+
+    kline_dir = output_dir / "kline"
+    kline_index: dict[str, str] = {}
+    symbol_paths: dict[str, list[str]] = {}
+
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        for ts_code in sorted(ts_codes):
+            rows = conn.execute(
+                """SELECT trade_date, open, high, low, close, pre_close, vol, amount
+                   FROM daily
+                   WHERE ts_code = ?
+                   ORDER BY trade_date DESC
+                   LIMIT ?""",
+                (ts_code, limit),
+            ).fetchall()
+            if not rows:
+                continue
+
+            name_row = conn.execute(
+                "SELECT name FROM stock_basic WHERE ts_code = ?",
+                (ts_code,),
+            ).fetchone()
+            items = [dict(row) for row in reversed(rows)]
+            payload = {
+                "ts_code": ts_code,
+                "name": name_row["name"] if name_row else "",
+                "count": len(items),
+                "kline": items,
+                "generated_at": generated_at,
+            }
+            filename = f"{ts_code}.json"
+            path = kline_dir / filename
+            write_json(path, payload)
+
+            relative = f"data/kline/{filename}"
+            kline_index[ts_code] = relative
+            symbol = ts_code.split(".", 1)[0]
+            symbol_paths.setdefault(symbol, []).append(relative)
+
+    for symbol, paths in symbol_paths.items():
+        if len(paths) == 1:
+            kline_index[symbol] = paths[0]
+
+    return kline_index
 
 
 def industry_counts(df: pd.DataFrame) -> dict[str, int]:
@@ -178,9 +313,15 @@ def build_industry_trends(
     }
 
 
-def export_static_data(data_dir: Path, output_dir: Path) -> dict[str, object]:
+def export_static_data(
+    data_dir: Path,
+    output_dir: Path,
+    db_path: Path = DEFAULT_DB_PATH,
+    kline_limit: int = 120,
+) -> dict[str, object]:
     data_dir = data_dir.resolve()
     output_dir = output_dir.resolve()
+    db_path = db_path.resolve()
 
     if output_dir.exists():
         shutil.rmtree(output_dir)
@@ -233,6 +374,13 @@ def export_static_data(data_dir: Path, output_dir: Path) -> dict[str, object]:
         if search_frames
         else pd.DataFrame()
     )
+    kline_index = export_kline_data(
+        resolve_export_codes(collect_code_values(search_df), db_path),
+        db_path,
+        output_dir,
+        kline_limit,
+        generated_at,
+    )
     search_payload = frame_payload(search_df)
     search_payload.update(
         {
@@ -254,6 +402,9 @@ def export_static_data(data_dir: Path, output_dir: Path) -> dict[str, object]:
         "dates": date_entries,
         "search_index": "data/search_index.json",
         "industry_trends": "data/industry_trends.json",
+        "kline_limit": kline_limit,
+        "kline_count": len({path for key, path in kline_index.items() if "." in key}),
+        "kline_index": kline_index,
     }
     write_json(output_dir / "manifest.json", manifest)
     return manifest
@@ -261,9 +412,10 @@ def export_static_data(data_dir: Path, output_dir: Path) -> dict[str, object]:
 
 def main() -> int:
     args = parse_args()
-    manifest = export_static_data(args.data_dir, args.output_dir)
+    manifest = export_static_data(args.data_dir, args.output_dir, args.db_path, args.kline_limit)
     print(f"Exported static web data to: {args.output_dir}")
     print(f"Dates: {len(manifest['dates'])}; latest: {manifest['latest_date']}")
+    print(f"K-line files: {manifest['kline_count']}; limit: {manifest['kline_limit']}")
     return 0
 
 
