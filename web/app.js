@@ -8,6 +8,9 @@ const state = {
   mode: "date",
   columns: [],
   rows: [],
+  dateColumns: [],
+  dateRows: [],
+  selectedIndustry: null,
 };
 
 const els = {
@@ -19,6 +22,7 @@ const els = {
   modeLabel: document.querySelector("#modeLabel"),
   summaryTitle: document.querySelector("#summaryTitle"),
   summaryMeta: document.querySelector("#summaryMeta"),
+  industryBack: document.querySelector("#industryBack"),
   tableHead: document.querySelector("#tableHead"),
   tableBody: document.querySelector("#tableBody"),
   mobileList: document.querySelector("#mobileList"),
@@ -210,7 +214,7 @@ function renderDateTabs() {
     const button = document.createElement("button");
     button.type = "button";
     button.textContent = displayDate(item.date);
-    button.className = item.date === state.selectedDate && state.mode === "date" ? "active" : "";
+    button.className = item.date === state.selectedDate && ["date", "industry"].includes(state.mode) ? "active" : "";
     button.title = (item.files || []).join("\n");
     button.addEventListener("click", () => loadDate(item.date));
     els.dateTabs.append(button);
@@ -324,6 +328,61 @@ function countMap(row) {
   return new Map((row.counts || []).map((item) => [item.date, Number(item.count || 0)]));
 }
 
+function normalizeIndustry(value) {
+  const industry = String(value ?? "").trim();
+  return industry || "未分类";
+}
+
+function previousTrendDate(dates, selectedDate) {
+  const index = dates.indexOf(selectedDate);
+  return index > 0 ? dates[index - 1] : null;
+}
+
+function countForDate(row, date) {
+  return countMap(row).get(date) || 0;
+}
+
+function industryPayloadForDate(payload, selectedDate) {
+  if (!payload || !selectedDate) return payload;
+
+  const allDates = payload.dates || [];
+  const chartDates = allDates.filter((date) => date <= selectedDate);
+  const dates = chartDates.length ? chartDates : allDates;
+  const previousDate = previousTrendDate(allDates, selectedDate);
+
+  const rows = (payload.industries || []).map((row) => {
+    const latestCount = countForDate(row, selectedDate);
+    const previousCount = previousDate ? countForDate(row, previousDate) : 0;
+    return {
+      ...row,
+      latest_count: latestCount,
+      previous_count: previousCount,
+      change: latestCount - previousCount,
+      is_new_latest: latestCount > 0 && previousCount === 0,
+      is_removed_latest: latestCount === 0 && previousCount > 0,
+      counts: (row.counts || []).filter((item) => !dates.length || dates.includes(item.date)),
+    };
+  });
+
+  const latestRows = rows
+    .filter((row) => row.latest_count > 0)
+    .sort((a, b) => b.latest_count - a.latest_count || b.change - a.change || a.industry.localeCompare(b.industry, "zh-Hans-CN"));
+  const removedLatest = rows
+    .filter((row) => row.is_removed_latest)
+    .sort((a, b) => b.previous_count - a.previous_count || a.industry.localeCompare(b.industry, "zh-Hans-CN"));
+
+  return {
+    ...payload,
+    dates,
+    latest_date: selectedDate,
+    previous_date: previousDate,
+    industries: rows,
+    latest: latestRows,
+    new_latest: latestRows.filter((row) => row.is_new_latest),
+    removed_latest: removedLatest,
+  };
+}
+
 function renderIndustryChart(payload) {
   const dates = payload.dates || [];
   const rows = (payload.latest || []).slice(0, 8);
@@ -394,6 +453,9 @@ function renderIndustryChart(payload) {
     const name = document.createElement("span");
     name.className = "legend-name";
     name.textContent = `${row.industry} ${row.latest_count}`;
+    legend.dataset.industry = row.industry;
+    legend.title = `查看 ${displayDate(state.selectedDate || payload.latest_date)} ${row.industry} 股票`;
+    legend.addEventListener("click", () => showIndustryStocks(row.industry, state.selectedDate || payload.latest_date));
     legend.append(swatch, name);
     els.industryLegend.append(legend);
   });
@@ -415,6 +477,9 @@ function renderNewIndustries(payload) {
   for (const row of rows.slice(0, 12)) {
     const item = document.createElement("div");
     item.className = "new-industry-item";
+    item.dataset.industry = row.industry;
+    item.title = `查看 ${displayDate(state.selectedDate || payload.latest_date)} ${row.industry} 股票`;
+    item.addEventListener("click", () => showIndustryStocks(row.industry, state.selectedDate || payload.latest_date));
     const name = document.createElement("strong");
     name.textContent = row.industry;
     const count = document.createElement("span");
@@ -451,10 +516,12 @@ function renderRemovedIndustries(payload) {
 
 function renderIndustryTable(payload) {
   els.industryTableBody.innerHTML = "";
-  const rows = (payload.latest || []).slice(0, 18);
+  const rows = payload.latest || [];
 
   for (const row of rows) {
     const tr = document.createElement("tr");
+    tr.title = `查看 ${displayDate(state.selectedDate || payload.latest_date)} ${row.industry} 股票`;
+    tr.addEventListener("click", () => showIndustryStocks(row.industry, state.selectedDate || payload.latest_date));
 
     const industry = document.createElement("td");
     industry.textContent = row.industry;
@@ -476,26 +543,66 @@ function renderIndustryTable(payload) {
 }
 
 function renderIndustryPanel(payload) {
-  const latestRows = payload.latest || [];
+  const displayPayload = industryPayloadForDate(payload, state.selectedDate || payload.latest_date);
+  const latestRows = displayPayload.latest || [];
   const totalIndustries = latestRows.length;
   const totalStocks = latestRows.reduce((sum, row) => sum + Number(row.latest_count || 0), 0);
-  const newCount = (payload.new_latest || []).length;
-  const removedCount = (payload.removed_latest || []).length;
+  const newCount = (displayPayload.new_latest || []).length;
+  const removedCount = (displayPayload.removed_latest || []).length;
 
-  els.industrySubtitle.textContent = `${displayDate(payload.latest_date)} 行业分布`;
+  els.industrySubtitle.textContent = `${displayDate(displayPayload.latest_date)} 行业分布`;
   els.industryStat.textContent = `${totalIndustries} 个行业 · ${totalStocks} 只股票`;
-  els.industryChartMeta.textContent = `最新 Top 8 · ${payload.dates?.length || 0} 天`;
-  els.industryChangeMeta.textContent = payload.previous_date
-    ? `${displayDate(payload.previous_date)} → ${displayDate(payload.latest_date)}`
-    : displayDate(payload.latest_date);
+  els.industryChartMeta.textContent = `当日 Top 8 · ${displayPayload.dates?.length || 0} 天`;
+  els.industryChangeMeta.textContent = displayPayload.previous_date
+    ? `${displayDate(displayPayload.previous_date)} → ${displayDate(displayPayload.latest_date)}`
+    : displayDate(displayPayload.latest_date);
 
-  renderIndustryChart(payload);
-  renderNewIndustries(payload);
-  renderRemovedIndustries(payload);
-  renderIndustryTable(payload);
+  renderIndustryChart(displayPayload);
+  renderNewIndustries(displayPayload);
+  renderRemovedIndustries(displayPayload);
+  renderIndustryTable(displayPayload);
 
   if (newCount > 0 || removedCount > 0) {
-    els.industrySubtitle.textContent = `${displayDate(payload.latest_date)} 新进 ${newCount} 个 · 消失 ${removedCount} 个`;
+    els.industrySubtitle.textContent = `${displayDate(displayPayload.latest_date)} 新进 ${newCount} 个 · 消失 ${removedCount} 个`;
+  }
+}
+
+function rowIndustry(row) {
+  return normalizeIndustry(row.industry);
+}
+
+function stockDisplayName(row, fallback) {
+  return row.name || row.stock_name || row["股票名称"] || row["股票简称"] || row["证券简称"] || fallback;
+}
+
+function showIndustryStocks(industry, date = state.selectedDate) {
+  const targetIndustry = normalizeIndustry(industry);
+  const columns = state.dateColumns.length ? state.dateColumns : state.columns;
+  const rows = (state.dateRows.length ? state.dateRows : state.rows).filter((row) => rowIndustry(row) === targetIndustry);
+
+  state.mode = "industry";
+  state.selectedIndustry = targetIndustry;
+  state.columns = columns;
+  state.rows = rows;
+  els.searchInput.value = "";
+  els.industryBack.hidden = false;
+  els.industryPanel.hidden = true;
+  els.detailPanel.hidden = true;
+  els.listPanel.hidden = false;
+  els.modeLabel.textContent = "行业";
+  els.summaryTitle.textContent = targetIndustry;
+  els.summaryMeta.textContent = `${displayDate(date)} · ${rows.length} 只股票 · 点击股票进入详情`;
+  els.subtitle.textContent = `当前日期 ${displayDate(date)} · 行业 ${targetIndustry}`;
+  els.emptyState.hidden = rows.length > 0;
+  els.emptyState.textContent = `${displayDate(date)} 没有行业为 ${targetIndustry} 的股票`;
+  renderDateTabs();
+  renderTable(columns, rows);
+  renderMobile(columns, rows);
+}
+
+function backToIndustryList() {
+  if (state.selectedDate) {
+    loadDate(state.selectedDate);
   }
 }
 
@@ -557,7 +664,7 @@ async function loadStockDetailData(tsCode) {
 function showListView() {
   els.detailPanel.hidden = true;
   els.listPanel.hidden = false;
-  els.industryPanel.hidden = state.mode === "search";
+  els.industryPanel.hidden = state.mode === "search" || state.mode === "industry";
 }
 
 function showStockDetail(tsCode, name) {
@@ -599,6 +706,7 @@ function backToList() {
 }
 
 els.detailBack.addEventListener("click", backToList);
+els.industryBack.addEventListener("click", backToIndustryList);
 
 /* ── Candlestick Chart (SVG) ── */
 
@@ -863,7 +971,7 @@ function renderTable(columns, rows) {
     rowEl.style.cursor = "pointer";
     rowEl.addEventListener("click", () => {
       const tsCode = getTsCode(row, columns);
-      if (tsCode) showStockDetail(tsCode, row.name || row.stock_name || row["股票名称"] || tsCode);
+      if (tsCode) showStockDetail(tsCode, stockDisplayName(row, tsCode));
     });
     for (const column of columns) {
       const td = document.createElement("td");
@@ -892,7 +1000,7 @@ function renderMobile(columns, rows) {
     card.style.cursor = "pointer";
     const tsCode = getTsCode(row, columns);
     card.addEventListener("click", () => {
-      if (tsCode) showStockDetail(tsCode, row.name || row.stock_name || row["股票名称"] || tsCode);
+      if (tsCode) showStockDetail(tsCode, stockDisplayName(row, tsCode));
     });
 
     const code = firstValue(row, ["ts_code", "code", "stock_code", "证券代码", "股票代码"]);
@@ -943,9 +1051,15 @@ function renderMobile(columns, rows) {
 function renderData(payload) {
   syncDates(payload);
   state.mode = payload.mode || state.mode;
+  state.selectedIndustry = null;
+  els.industryBack.hidden = true;
   showListView();
   state.columns = orderedColumns(payload.columns || []);
   state.rows = payload.rows || [];
+  if (state.mode === "date") {
+    state.dateColumns = state.columns;
+    state.dateRows = state.rows;
+  }
 
   const rowCount = payload.row_count ?? state.rows.length;
   els.emptyState.hidden = rowCount > 0;
@@ -965,6 +1079,9 @@ function renderData(payload) {
   }
 
   renderDateTabs();
+  if (state.mode === "date" && state.industryTrends) {
+    renderIndustryPanel(state.industryTrends);
+  }
   renderTable(state.columns, state.rows);
   renderMobile(state.columns, state.rows);
 }

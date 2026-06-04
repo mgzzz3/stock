@@ -198,6 +198,32 @@ h1 {
   color: var(--muted);
 }
 
+.summary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.summary-back {
+  height: 30px;
+  flex: 0 0 auto;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  padding: 0 10px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.summary-back:hover {
+  border-color: var(--accent-strong);
+  background: #d5ecea;
+}
+
 .summary-meta {
   text-align: right;
 }
@@ -316,8 +342,17 @@ h1 {
   align-items: center;
   gap: 6px;
   max-width: 160px;
+  border-radius: 999px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.legend-item[data-industry] {
+  cursor: pointer;
+}
+
+.legend-item[data-industry]:hover {
+  color: var(--accent-strong);
 }
 
 .legend-swatch {
@@ -375,6 +410,15 @@ h1 {
   background: #fbfcfc;
 }
 
+.new-industry-item[data-industry] {
+  cursor: pointer;
+}
+
+.new-industry-item[data-industry]:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .new-industry-item strong {
   display: block;
   overflow: hidden;
@@ -414,6 +458,14 @@ h1 {
 
 .industry-table {
   min-width: 520px;
+}
+
+.industry-table tbody tr {
+  cursor: pointer;
+}
+
+.industry-table tbody tr:hover {
+  background: var(--accent-soft);
 }
 
 .industry-table td:nth-child(2),
@@ -842,8 +894,13 @@ td[data-col="bull_bear"] {
     display: block;
   }
 
-  .summary-meta {
+  .summary-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
     margin-top: 6px;
+  }
+
+  .summary-meta {
     text-align: left;
   }
 
