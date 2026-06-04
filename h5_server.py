@@ -136,6 +136,31 @@ def resolve_ts_code(conn: sqlite3.Connection, raw_code: str) -> str:
     return code
 
 
+def signal_dates_for_code(data_dir: Path, ts_code: str) -> list[str]:
+    dates: set[str] = set()
+    symbol = ts_code.split(".", 1)[0].upper()
+    variants = {ts_code.upper(), symbol}
+
+    for path in csv_files(data_dir):
+        date = csv_date(path)
+        if not date:
+            continue
+        df = read_csv(path)
+        normalized_columns = {column.lower().replace("_", ""): column for column in df.columns}
+        code_columns = []
+        for candidate in ("ts_code", "code", "symbol", "stock_code", "股票代码", "证券代码"):
+            column = candidate if candidate in df.columns else normalized_columns.get(candidate.lower().replace("_", ""))
+            if column and column not in code_columns:
+                code_columns.append(column)
+        for column in code_columns:
+            values = {str(value).strip().upper() for value in df[column].dropna()}
+            if variants & values:
+                dates.add(date)
+                break
+
+    return sorted(dates)
+
+
 class H5Handler(SimpleHTTPRequestHandler):
     data_dir = DATA_DIR
 
@@ -268,6 +293,7 @@ class H5Handler(SimpleHTTPRequestHandler):
                 "name": name_row["name"] if name_row else "",
                 "count": len(items),
                 "kline": items,
+                "signal_dates": signal_dates_for_code(self.data_dir, ts_code),
             }, HTTPStatus.OK
 
         except Exception as e:
