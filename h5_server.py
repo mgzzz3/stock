@@ -25,7 +25,14 @@ from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 
-from search_stock_csv import order_columns, read_csv, relative_path, search_csvs
+from search_stock_csv import (
+    CODE_COLUMNS,
+    normalized_column,
+    order_columns,
+    read_csv,
+    relative_path,
+    search_csvs,
+)
 from store.db import connect as db_connect, DB_PATH
 
 
@@ -146,10 +153,10 @@ def signal_dates_for_code(data_dir: Path, ts_code: str) -> list[str]:
         if not date:
             continue
         df = read_csv(path)
-        normalized_columns = {column.lower().replace("_", ""): column for column in df.columns}
+        normalized_columns = {normalized_column(column): column for column in df.columns}
         code_columns = []
-        for candidate in ("ts_code", "code", "symbol", "stock_code", "股票代码", "证券代码"):
-            column = candidate if candidate in df.columns else normalized_columns.get(candidate.lower().replace("_", ""))
+        for candidate in CODE_COLUMNS:
+            column = candidate if candidate in df.columns else normalized_columns.get(normalized_column(candidate))
             if column and column not in code_columns:
                 code_columns.append(column)
         for column in code_columns:
