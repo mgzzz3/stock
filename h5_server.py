@@ -25,7 +25,14 @@ from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 
-from search_stock_csv import order_columns, read_csv, relative_path, search_csvs
+from search_stock_csv import (
+    CODE_COLUMNS,
+    normalized_column,
+    order_columns,
+    read_csv,
+    relative_path,
+    search_csvs,
+)
 from store.db import connect as db_connect, DB_PATH
 
 
@@ -134,6 +141,31 @@ def resolve_ts_code(conn: sqlite3.Connection, raw_code: str) -> str:
             return inferred
 
     return code
+
+
+def signal_dates_for_code(data_dir: Path, ts_code: str) -> list[str]:
+    dates: set[str] = set()
+    symbol = ts_code.split(".", 1)[0].upper()
+    variants = {ts_code.upper(), symbol}
+
+    for path in csv_files(data_dir):
+        date = csv_date(path)
+        if not date:
+            continue
+        df = read_csv(path)
+        normalized_columns = {normalized_column(column): column for column in df.columns}
+        code_columns = []
+        for candidate in CODE_COLUMNS:
+            column = candidate if candidate in df.columns else normalized_columns.get(normalized_column(candidate))
+            if column and column not in code_columns:
+                code_columns.append(column)
+        for column in code_columns:
+            values = {str(value).strip().upper() for value in df[column].dropna()}
+            if variants & values:
+                dates.add(date)
+                break
+
+    return sorted(dates)
 
 
 class H5Handler(SimpleHTTPRequestHandler):
@@ -268,6 +300,7 @@ class H5Handler(SimpleHTTPRequestHandler):
                 "name": name_row["name"] if name_row else "",
                 "count": len(items),
                 "kline": items,
+                "signal_dates": signal_dates_for_code(self.data_dir, ts_code),
             }, HTTPStatus.OK
 
         except Exception as e:

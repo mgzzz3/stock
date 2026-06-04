@@ -159,8 +159,80 @@ def resolve_export_codes(code_values: set[str], db_path: Path) -> set[str]:
     return resolved
 
 
+def resolve_code_map(code_values: set[str], db_path: Path) -> dict[str, str]:
+    """Return a best-effort mapping from raw CSV code values to canonical ts_code."""
+    mapping: dict[str, str] = {}
+    symbols: set[str] = set()
+
+    for raw in code_values:
+        code = str(raw).strip().upper()
+        if not code:
+            continue
+        if TS_CODE_RE.match(code):
+            mapping[code] = code
+        elif SYMBOL_RE.match(code):
+            symbols.add(code)
+
+    if symbols and db_path.exists():
+        with sqlite3.connect(db_path) as conn:
+            symbol_list = sorted(symbols)
+            for start in range(0, len(symbol_list), 500):
+                chunk = symbol_list[start : start + 500]
+                rows = conn.execute(
+                    f"SELECT symbol, ts_code FROM stock_basic WHERE symbol IN ({','.join('?' for _ in chunk)})",
+                    chunk,
+                ).fetchall()
+                for symbol, ts_code in rows:
+                    if ts_code:
+                        mapping[str(symbol).strip().upper()] = str(ts_code).strip().upper()
+
+    for symbol in symbols:
+        if symbol not in mapping:
+            inferred = infer_ts_code(symbol)
+            if inferred:
+                mapping[symbol] = inferred
+
+    return mapping
+
+
+def build_signal_dates(search_df: pd.DataFrame, db_path: Path) -> dict[str, list[str]]:
+    """Collect every exported screening date for each stock code."""
+    if search_df.empty or "signal_date" not in search_df.columns:
+        return {}
+
+    code_columns = [column for column in search_df.columns if column in CODE_COLUMNS]
+    if not code_columns:
+        normalized_columns = {column.lower().replace("_", ""): column for column in search_df.columns}
+        code_columns = [
+            normalized_columns[candidate.lower().replace("_", "")]
+            for candidate in CODE_COLUMNS
+            if candidate.lower().replace("_", "") in normalized_columns
+        ]
+    if not code_columns:
+        return {}
+
+    raw_values: set[str] = set()
+    for column in code_columns:
+        raw_values.update(str(value).strip().upper() for value in search_df[column].dropna() if str(value).strip())
+    code_map = resolve_code_map(raw_values, db_path)
+
+    signals: dict[str, set[str]] = {}
+    for _, row in search_df.iterrows():
+        date = str(row.get("signal_date", "")).strip()
+        if not DATE_RE.match(date):
+            continue
+        for column in code_columns:
+            raw_code = str(row.get(column, "")).strip().upper()
+            ts_code = code_map.get(raw_code)
+            if ts_code:
+                signals.setdefault(ts_code, set()).add(date)
+                break
+
+    return {ts_code: sorted(dates) for ts_code, dates in signals.items()}
+
 def export_kline_data(
     ts_codes: set[str],
+    signal_dates: dict[str, list[str]],
     db_path: Path,
     output_dir: Path,
     limit: int,
@@ -197,6 +269,7 @@ def export_kline_data(
                 "name": name_row["name"] if name_row else "",
                 "count": len(items),
                 "kline": items,
+                "signal_dates": signal_dates.get(ts_code, []),
                 "generated_at": generated_at,
             }
             filename = f"{ts_code}.json"
@@ -374,8 +447,10 @@ def export_static_data(
         if search_frames
         else pd.DataFrame()
     )
+    signal_dates = build_signal_dates(search_df, db_path)
     kline_index = export_kline_data(
         resolve_export_codes(collect_code_values(search_df), db_path),
+        signal_dates,
         db_path,
         output_dir,
         kline_limit,
@@ -405,6 +480,7 @@ def export_static_data(
         "kline_limit": kline_limit,
         "kline_count": len({path for key, path in kline_index.items() if "." in key}),
         "kline_index": kline_index,
+        "signal_dates": signal_dates,
     }
     write_json(output_dir / "manifest.json", manifest)
     return manifest

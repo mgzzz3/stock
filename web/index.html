@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A 股信号浏览</title>
-    <link rel="stylesheet" href="styles.css?v=kline-1" />
+    <link rel="stylesheet" href="styles.css?v=signal-return-1" />
   </head>
   <body>
     <main class="shell">
@@ -122,14 +122,21 @@
           </div>
           <div class="detail-meta" id="detailMeta"></div>
         </div>
-        <div class="detail-chart-wrap">
-          <svg id="klineChart" viewBox="0 0 800 400" role="img" aria-label="日线K线图"></svg>
+        <div class="detail-body">
+          <div class="detail-chart-wrap">
+            <svg id="klineChart" viewBox="0 0 800 400" role="img" aria-label="日线K线图"></svg>
+          </div>
+          <aside class="detail-return-panel" aria-label="B标记收益">
+            <div class="detail-return-title">B标记收益</div>
+            <div class="detail-return-note">近20个交易日内出现的B，按次日开盘买入计算至最新收盘。</div>
+            <div class="detail-return-list" id="detailReturns"></div>
+          </aside>
         </div>
-        <div class="detail-loading" id="detailLoading">加载中…</div>
+        <div class="detail-loading" id="detailLoading">正在加载日线数据…</div>
         <div class="detail-error" id="detailError" hidden></div>
       </section>
     </main>
 
-    <script src="app.js?v=kline-2" defer></script>
+    <script src="app.js?v=signal-return-1" defer></script>
   </body>
 </html>

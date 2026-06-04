@@ -41,6 +41,7 @@ const els = {
   detailCode: document.querySelector("#detailCode"),
   detailMeta: document.querySelector("#detailMeta"),
   klineChart: document.querySelector("#klineChart"),
+  detailReturns: document.querySelector("#detailReturns"),
   detailLoading: document.querySelector("#detailLoading"),
   detailError: document.querySelector("#detailError"),
   industryPanel: document.querySelector(".industry-panel"),
@@ -568,7 +569,8 @@ function showStockDetail(tsCode, name) {
   els.detailLoading.hidden = false;
   els.detailError.hidden = true;
   els.klineChart.innerHTML = "";
-  els.detailMeta.textContent = "获取数据中…";
+  els.detailReturns.innerHTML = "";
+  els.detailMeta.textContent = "获取日线数据中…";
 
   loadStockDetailData(tsCode)
     .then((data) => {
@@ -579,8 +581,11 @@ function showStockDetail(tsCode, name) {
         return;
       }
       els.detailName.textContent = data.name || name || "--";
-      els.detailMeta.textContent = `${data.count} 个交易日`;
-      renderKlineChart(data.kline, data.name || tsCode);
+      const signalDates = data.signal_dates || state.manifest?.signal_dates?.[data.ts_code] || state.manifest?.signal_dates?.[tsCode] || [];
+      const signalCount = signalDates.length;
+      els.detailMeta.textContent = `${data.count} 个交易日${signalCount ? ` · ${signalCount} 个B标记` : ""}`;
+      renderKlineChart(data.kline, data.name || tsCode, signalDates);
+      renderSignalReturns(data.kline, signalDates);
     })
     .catch((err) => {
       els.detailLoading.hidden = true;
@@ -597,7 +602,65 @@ els.detailBack.addEventListener("click", backToList);
 
 /* ── Candlestick Chart (SVG) ── */
 
-function renderKlineChart(kline, stockLabel) {
+function formatPercent(value) {
+  if (!Number.isFinite(value)) return "--";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function signalDateSet(signalDates) {
+  return new Set((signalDates || []).map((date) => String(date).trim()).filter(Boolean));
+}
+
+function recentSignalIndexes(kline, signalDates, windowSize = 20) {
+  const signals = signalDateSet(signalDates);
+  const start = Math.max(0, kline.length - windowSize);
+  return kline
+    .map((item, index) => ({ item, index }))
+    .filter(({ item, index }) => index >= start && signals.has(String(item.trade_date || "")));
+}
+
+function renderSignalReturns(kline, signalDates) {
+  els.detailReturns.innerHTML = "";
+
+  if (!kline || kline.length < 2) {
+    els.detailReturns.textContent = "K线数据不足，无法计算。";
+    return;
+  }
+
+  const signals = recentSignalIndexes(kline, signalDates);
+  if (!signals.length) {
+    els.detailReturns.textContent = "近20个交易日无B标记。";
+    return;
+  }
+
+  const latest = kline[kline.length - 1];
+  const latestClose = Number(latest.close);
+
+  for (const { item, index } of signals.reverse()) {
+    const row = document.createElement("div");
+    row.className = "detail-return-row";
+
+    const date = document.createElement("span");
+    date.textContent = displayDate(item.trade_date);
+
+    const value = document.createElement("strong");
+    if (index + 1 >= kline.length) {
+      value.textContent = "待次日开盘";
+      value.className = "return-pending";
+    } else {
+      const buyOpen = Number(kline[index + 1].open);
+      const pct = ((latestClose - buyOpen) / buyOpen) * 100;
+      value.textContent = formatPercent(pct);
+      value.title = `买入价 ${buyOpen.toFixed(2)}，最新收盘 ${latestClose.toFixed(2)}`;
+      value.className = pct > 0 ? "return-up" : pct < 0 ? "return-down" : "return-flat";
+    }
+
+    row.append(date, value);
+    els.detailReturns.append(row);
+  }
+}
+
+function renderKlineChart(kline, stockLabel, signalDates = []) {
   const svg = els.klineChart;
   svg.innerHTML = "";
 
@@ -731,6 +794,21 @@ function renderKlineChart(kline, stockLabel) {
       height: Math.max(1, volBarH),
       class: `kline-vol ${colorClass}`,
     }));
+  }
+
+  // B markers for screening dates
+  const signalIndexes = recentSignalIndexes(kline, signalDates, kline.length);
+  for (const { item, index } of signalIndexes) {
+    const x = xFor(index);
+    const y = yFor(Number(item.low)) + 18;
+    const marker = svgNode("text", {
+      x,
+      y: Math.min(pad.top + mainHeight - 4, y),
+      "text-anchor": "middle",
+      class: "kline-b-marker",
+    });
+    marker.textContent = "B";
+    svg.append(marker);
   }
 
   // Legend
