@@ -164,6 +164,7 @@ async function fetchJson(url) {
 }
 
 function setLoading(text) {
+  els.industryPanel.hidden = state.mode === "search";
   els.summaryTitle.textContent = text;
   els.summaryMeta.textContent = "加载中";
   els.tableHead.innerHTML = "";
@@ -555,7 +556,7 @@ async function loadStockDetailData(tsCode) {
 function showListView() {
   els.detailPanel.hidden = true;
   els.listPanel.hidden = false;
-  els.industryPanel.hidden = false;
+  els.industryPanel.hidden = state.mode === "search";
 }
 
 function showStockDetail(tsCode, name) {
@@ -862,9 +863,9 @@ function renderMobile(columns, rows) {
 }
 
 function renderData(payload) {
-  showListView();
   syncDates(payload);
   state.mode = payload.mode || state.mode;
+  showListView();
   state.columns = orderedColumns(payload.columns || []);
   state.rows = payload.rows || [];
 
