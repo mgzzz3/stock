@@ -34,6 +34,31 @@ WEB_DIR = ROOT / "web"
 DATA_DIR = ROOT / "data"
 DATE_RE = re.compile(r"(?<!\d)(20\d{6})(?!\d)")
 SYMBOL_RE = re.compile(r"^\d{6}$")
+CODE_COLUMNS = (
+    "ts_code",
+    "code",
+    "symbol",
+    "stock_code",
+    "seccode",
+    "security_code",
+    "ticker",
+    "股票代码",
+    "证券代码",
+)
+
+
+def normalize_column_name(column: object) -> str:
+    return re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "", str(column).lower())
+
+
+def recognized_code_columns(columns: pd.Index) -> list[str]:
+    candidates = set(CODE_COLUMNS)
+    normalized_candidates = {normalize_column_name(candidate) for candidate in CODE_COLUMNS}
+    code_columns: list[str] = []
+    for column in columns:
+        if column in candidates or normalize_column_name(column) in normalized_candidates:
+            code_columns.append(column)
+    return code_columns
 
 
 def parse_args() -> argparse.Namespace:
@@ -146,12 +171,7 @@ def signal_dates_for_code(data_dir: Path, ts_code: str) -> list[str]:
         if not date:
             continue
         df = read_csv(path)
-        normalized_columns = {column.lower().replace("_", ""): column for column in df.columns}
-        code_columns = []
-        for candidate in ("ts_code", "code", "symbol", "stock_code", "股票代码", "证券代码"):
-            column = candidate if candidate in df.columns else normalized_columns.get(candidate.lower().replace("_", ""))
-            if column and column not in code_columns:
-                code_columns.append(column)
+        code_columns = recognized_code_columns(df.columns)
         for column in code_columns:
             values = {str(value).strip().upper() for value in df[column].dropna()}
             if variants & values:

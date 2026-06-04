@@ -46,6 +46,20 @@ TS_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$", re.IGNORECASE)
 SYMBOL_RE = re.compile(r"^\d{6}$")
 
 
+def normalize_column_name(column: object) -> str:
+    return re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "", str(column).lower())
+
+
+def recognized_code_columns(columns: pd.Index) -> list[str]:
+    candidates = set(CODE_COLUMNS)
+    normalized_candidates = {normalize_column_name(candidate) for candidate in CODE_COLUMNS}
+    code_columns: list[str] = []
+    for column in columns:
+        if column in candidates or normalize_column_name(column) in normalized_candidates:
+            code_columns.append(column)
+    return code_columns
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export web/static JSON data.")
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR, type=Path)
@@ -120,11 +134,7 @@ def collect_code_values(df: pd.DataFrame) -> set[str]:
     if df.empty:
         return values
 
-    normalized_columns = {column.lower().replace("_", ""): column for column in df.columns}
-    for candidate in CODE_COLUMNS:
-        column = candidate if candidate in df.columns else normalized_columns.get(candidate.lower().replace("_", ""))
-        if not column:
-            continue
+    for column in recognized_code_columns(df.columns):
         for value in df[column].dropna().astype(str):
             code = value.strip().upper()
             if code:
@@ -200,14 +210,7 @@ def build_signal_dates(search_df: pd.DataFrame, db_path: Path) -> dict[str, list
     if search_df.empty or "signal_date" not in search_df.columns:
         return {}
 
-    code_columns = [column for column in search_df.columns if column in CODE_COLUMNS]
-    if not code_columns:
-        normalized_columns = {column.lower().replace("_", ""): column for column in search_df.columns}
-        code_columns = [
-            normalized_columns[candidate.lower().replace("_", "")]
-            for candidate in CODE_COLUMNS
-            if candidate.lower().replace("_", "") in normalized_columns
-        ]
+    code_columns = recognized_code_columns(search_df.columns)
     if not code_columns:
         return {}
 
