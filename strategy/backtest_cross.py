@@ -1,8 +1,10 @@
 """Historical scan of MA golden-cross signals with forward-return evaluation.
 
-For every cross within the scan window, compute forward returns at given horizons
-(5/10/20 trading days by default). Compare to a market baseline (the unconditional
-mean forward return across all stocks on the same signal dates) to compute *lift*.
+For every cross within the scan window, compute N+1 forward returns at given
+horizons (5/10/20 trading days by default): signals are known only after day t
+closes, so entry is open[t+1] and the horizon exit is close[t+h]. Compare to a
+market baseline (the unconditional mean forward return across all stocks on the
+same signal dates) to compute *lift*.
 
 Without a baseline, signal mean-returns are uninterpretable — they reflect both
 the signal's edge and the general market drift over the window.
@@ -18,6 +20,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from . import loader
+from .forward_returns import add_n_plus_one_returns
 
 DEFAULT_HORIZONS = (5, 10, 20)
 
@@ -42,7 +45,7 @@ def backtest(
     load_start = _shift_calendar(scan_start, -int(long_window * 1.5))
     load_end = latest  # always load to latest so forward returns are available
     print(f"loading daily [{load_start} → {load_end}]...")
-    df = loader.load_all(start=load_start, end=load_end, columns=("close",))
+    df = loader.load_all(start=load_start, end=load_end, columns=("open", "close"))
     print(f"loaded {len(df):,} rows across {df['ts_code'].nunique()} stocks")
 
     # All vectorized — per-stock operations via groupby preserve (ts_code, trade_date) order.
@@ -53,17 +56,13 @@ def backtest(
     df["ma_l_prev"] = df.groupby("ts_code", sort=False)["ma_l"].shift(1)
     df["cross"] = (df["ma_s"] > df["ma_l"]) & (df["ma_s_prev"] <= df["ma_l_prev"])
 
-    ret_cols = []
-    for h in horizons:
-        future_close = df.groupby("ts_code", sort=False)["close"].shift(-h)
-        col = f"ret_{h}d"
-        df[col] = (future_close - df["close"]) / df["close"]
-        ret_cols.append(col)
+    # Signal close[t] -> buy open[t+1] -> sell close[t+h].
+    ret_cols = add_n_plus_one_returns(df, horizons)
 
     in_window = (df["trade_date"] >= scan_start) & (df["trade_date"] <= scan_end)
     signals = df[df["cross"] & in_window].dropna(subset=ret_cols).copy()
 
-    # Baseline: every stock's forward return on the same signal dates
+    # Baseline: every stock's N+1 forward return on the same signal dates
     signal_dates = signals["trade_date"].unique()
     baseline = df[df["trade_date"].isin(signal_dates)].dropna(subset=ret_cols)
 

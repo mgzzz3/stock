@@ -7,8 +7,8 @@ the 2024-09 → 2026-05 window:
     trend_short < bull_bear
     (知行短期趋势线 < 知行多空线 — short-term trend below long-term)
 
-In close-to-close +20d terms it showed +3.02% lift over baseline. b2 tests
-whether that edge survives under realistic short-horizon execution rules —
+Historical attribution showed positive +20d lift over baseline. b2 tests whether
+that edge survives under realistic short-horizon execution rules —
 see strategy.b2_backtest.
 
 Stocks are ranked by `gap_pct = (bull_bear - trend_short) / bull_bear`,

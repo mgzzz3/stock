@@ -1,8 +1,8 @@
 """b2 backtest with realistic execution model.
 
 Strategy b2 signal: trend_short < bull_bear (from `indicators.zhixing`).
-Tests whether the +3.02% lift seen at close-to-close +20d in b1_attribution
-survives under the realistic short-horizon execution model.
+Tests whether the historical +20d lift seen in b1_attribution survives under
+the realistic short-horizon execution model.
 
 Trading rules (identical to strategy.b1_backtest):
   - Signal computed at close of day t.
