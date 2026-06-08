@@ -1,7 +1,9 @@
 """Per-condition alpha attribution for strategy b1.
 
-Runs each of b1's 5 conditions as a standalone signal and measures forward-return
-lift over the market baseline, plus the full 5-way intersection for comparison.
+Runs each of b1's 5 conditions as a standalone signal and measures N+1
+forward-return lift over the market baseline, plus the full 5-way intersection
+for comparison. Signals are known after close[t], so return entry is open[t+1]
+and a h-day horizon exits at close[t+h].
 Identifies which conditions are alpha-positive vs negative — i.e. which ones
 are pulling b1's combined lift down.
 
@@ -20,6 +22,7 @@ import pandas as pd
 from indicators import kdj, zhixing
 from store.db import connect
 from strategy import loader
+from strategy.forward_returns import add_n_plus_one_returns
 
 DEFAULT_HORIZONS = (5, 10, 20)
 VOL_MA_PERIOD = 5
@@ -40,7 +43,7 @@ def _build_df(scan_start, horizons):
     print(f"loading daily [{load_start} → {load_end}]...")
     with connect() as conn:
         d = pd.read_sql_query(
-            "SELECT ts_code, trade_date, close, vol FROM daily "
+            "SELECT ts_code, trade_date, open, close, vol FROM daily "
             "WHERE trade_date BETWEEN ? AND ? ORDER BY ts_code, trade_date",
             conn, params=[load_start, load_end],
         )
@@ -52,12 +55,8 @@ def _build_df(scan_start, horizons):
     d["vol_ma5"] = g_vol.rolling(VOL_MA_PERIOD, min_periods=VOL_MA_PERIOD).mean().droplevel(0)
     d["vol_ratio"] = d["vol"] / d["vol_ma5"]
 
-    ret_cols = []
-    for h in horizons:
-        future_close = d.groupby("ts_code", sort=False)["close"].shift(-h)
-        col = f"ret_{h}d"
-        d[col] = (future_close - d["close"]) / d["close"]
-        ret_cols.append(col)
+    # Signal close[t] -> buy open[t+1] -> sell close[t+h].
+    ret_cols = add_n_plus_one_returns(d, horizons)
 
     print("loading indicators + merging...")
     k = kdj.load(start=load_start, end=load_end)[["ts_code", "trade_date", "j"]]
