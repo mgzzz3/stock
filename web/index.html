@@ -127,6 +127,12 @@
         </div>
         <div class="detail-body">
           <div class="detail-chart-wrap">
+            <div class="kline-hover-info" id="klineHoverInfo" aria-live="polite">
+              <strong id="klineHoverDate">--</strong>
+              <span>开盘 <b id="klineHoverOpen">--</b></span>
+              <span>收盘 <b id="klineHoverClose">--</b></span>
+              <span>涨幅 <b id="klineHoverChange">--</b></span>
+            </div>
             <svg id="klineChart" viewBox="0 0 800 400" role="img" aria-label="日线K线图"></svg>
           </div>
           <aside class="detail-return-panel" aria-label="B标记收益">
@@ -140,6 +146,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=signal-return-1" defer></script>
+    <script src="app.js?v=kline-hover-1" defer></script>
   </body>
 </html>
