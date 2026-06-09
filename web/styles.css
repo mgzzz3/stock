@@ -679,6 +679,42 @@ td[data-col="bull_bear"] {
   overflow: hidden;
 }
 
+.kline-hover-info {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 18px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfc;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.kline-hover-info strong {
+  min-width: 88px;
+  color: var(--text);
+}
+
+.kline-hover-info b {
+  margin-left: 4px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.kline-hover-info b.return-up {
+  color: #e74c3c;
+}
+
+.kline-hover-info b.return-down {
+  color: #2d9b61;
+}
+
+.kline-hover-info b.return-flat {
+  color: var(--muted);
+}
+
 #klineChart {
   display: block;
   width: 100%;
@@ -810,6 +846,19 @@ td[data-col="bull_bear"] {
   stroke-width: 0.5;
 }
 
+.kline-hover-line {
+  pointer-events: none;
+  stroke: var(--muted);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+
+.kline-hover-target {
+  cursor: crosshair;
+  fill: transparent;
+  pointer-events: all;
+}
+
 .kline-b-marker {
   fill: #fff;
   stroke: var(--accent-strong);
@@ -844,6 +893,15 @@ td[data-col="bull_bear"] {
 
   .detail-return-panel {
     min-height: auto;
+  }
+
+  .kline-hover-info {
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+
+  .kline-hover-info strong {
+    width: 100%;
   }
 
   #klineChart {

@@ -45,6 +45,10 @@ const els = {
   detailCode: document.querySelector("#detailCode"),
   detailMeta: document.querySelector("#detailMeta"),
   klineChart: document.querySelector("#klineChart"),
+  klineHoverDate: document.querySelector("#klineHoverDate"),
+  klineHoverOpen: document.querySelector("#klineHoverOpen"),
+  klineHoverClose: document.querySelector("#klineHoverClose"),
+  klineHoverChange: document.querySelector("#klineHoverChange"),
   detailReturns: document.querySelector("#detailReturns"),
   detailLoading: document.querySelector("#detailLoading"),
   detailError: document.querySelector("#detailError"),
@@ -676,6 +680,7 @@ function showStockDetail(tsCode, name) {
   els.detailLoading.hidden = false;
   els.detailError.hidden = true;
   els.klineChart.innerHTML = "";
+  updateKlineHoverInfo();
   els.detailReturns.innerHTML = "";
   els.detailMeta.textContent = "获取日线数据中…";
 
@@ -713,6 +718,30 @@ els.industryBack.addEventListener("click", backToIndustryList);
 function formatPercent(value) {
   if (!Number.isFinite(value)) return "--";
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function updateKlineHoverInfo(item, previousItem) {
+  if (!item) {
+    els.klineHoverDate.textContent = "--";
+    els.klineHoverOpen.textContent = "--";
+    els.klineHoverClose.textContent = "--";
+    els.klineHoverChange.textContent = "--";
+    els.klineHoverChange.className = "";
+    return;
+  }
+
+  const open = Number(item.open);
+  const close = Number(item.close);
+  const reportedPreClose = Number(item.pre_close);
+  const previousClose = Number(previousItem?.close);
+  const preClose = reportedPreClose > 0 ? reportedPreClose : previousClose;
+  const change = Number.isFinite(close) && preClose > 0 ? ((close - preClose) / preClose) * 100 : NaN;
+
+  els.klineHoverDate.textContent = displayDate(item.trade_date);
+  els.klineHoverOpen.textContent = Number.isFinite(open) ? open.toFixed(2) : "--";
+  els.klineHoverClose.textContent = Number.isFinite(close) ? close.toFixed(2) : "--";
+  els.klineHoverChange.textContent = formatPercent(change);
+  els.klineHoverChange.className = change > 0 ? "return-up" : change < 0 ? "return-down" : "return-flat";
 }
 
 function signalDateSet(signalDates) {
@@ -773,6 +802,7 @@ function renderKlineChart(kline, stockLabel, signalDates = []) {
   svg.innerHTML = "";
 
   if (!kline || kline.length < 2) {
+    updateKlineHoverInfo();
     const t = svgNode("text", { x: 400, y: 200, "text-anchor": "middle", class: "kline-label" });
     t.textContent = "K线数据不足";
     svg.append(t);
@@ -949,6 +979,42 @@ function renderKlineChart(kline, stockLabel, signalDates = []) {
   });
   priceLabel.textContent = lastPrice.toFixed(2);
   svg.append(priceLabel);
+
+  const hoverLine = svgNode("line", {
+    y1: pad.top,
+    y2: pad.top + mainHeight + 8 + volHeight,
+    class: "kline-hover-line",
+    visibility: "hidden",
+  });
+  const hoverTarget = svgNode("rect", {
+    x: pad.left,
+    y: pad.top,
+    width: plotW,
+    height: mainHeight + 8 + volHeight,
+    class: "kline-hover-target",
+  });
+
+  const selectKlineAt = (clientX) => {
+    const point = svg.createSVGPoint();
+    point.x = clientX;
+    point.y = 0;
+    const chartX = point.matrixTransform(svg.getScreenCTM().inverse()).x;
+    const index = Math.max(0, Math.min(kline.length - 1, Math.round(((chartX - pad.left) / plotW) * (kline.length - 1))));
+    const x = xFor(index);
+    hoverLine.setAttribute("x1", x);
+    hoverLine.setAttribute("x2", x);
+    hoverLine.setAttribute("visibility", "visible");
+    updateKlineHoverInfo(kline[index], kline[index - 1]);
+  };
+
+  hoverTarget.addEventListener("pointermove", (event) => selectKlineAt(event.clientX));
+  hoverTarget.addEventListener("pointerleave", () => {
+    hoverLine.setAttribute("visibility", "hidden");
+    updateKlineHoverInfo(kline[lastIdx], kline[lastIdx - 1]);
+  });
+
+  svg.append(hoverLine, hoverTarget);
+  updateKlineHoverInfo(kline[lastIdx], kline[lastIdx - 1]);
 }
 
 /* ── Table Rendering ── */
