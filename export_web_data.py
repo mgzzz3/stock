@@ -90,17 +90,96 @@ def write_json(path: Path, payload: dict[str, object]) -> None:
     )
 
 
+PREDICTION_COLUMNS = ("prediction_rank", "prob_up", "reasons", "next_trade_date")
+
+
+def is_prediction_file(path: Path, df: pd.DataFrame) -> bool:
+    """Return whether a CSV is a next-day prediction output."""
+    return "prob_up" in df.columns and (
+        path.name.startswith("next_day_") or "predictions" in path.parts
+    )
+
+
+def _code_column(df: pd.DataFrame) -> str | None:
+    normalized_columns = {column.lower().replace("_", ""): column for column in df.columns}
+    for candidate in CODE_COLUMNS:
+        column = candidate if candidate in df.columns else normalized_columns.get(candidate.lower().replace("_", ""))
+        if column:
+            return column
+    return None
+
+
 def combine_files(paths: list[Path]) -> pd.DataFrame:
-    frames = []
+    """Combine daily signals and annotate them with next-day predictions.
+
+    Prediction CSVs used to be concatenated as sparse, duplicate stock rows.  They
+    are now merged onto matching signal rows, while prediction-only picks remain
+    visible as standalone rows.
+    """
+    signal_frames: list[pd.DataFrame] = []
+    prediction_frames: list[pd.DataFrame] = []
     for path in paths:
         df = read_csv(path)
-        df.insert(0, "source_file", relative_path(path))
-        frames.append(df)
+        if is_prediction_file(path, df):
+            prediction = df.copy()
+            prediction["prediction_source_file"] = relative_path(path)
+            prediction["prediction_rank"] = range(1, len(prediction) + 1)
+            prediction_frames.append(prediction)
+        else:
+            df.insert(0, "source_file", relative_path(path))
+            signal_frames.append(df)
 
-    if not frames:
-        return pd.DataFrame()
+    signals = (
+        pd.concat(signal_frames, ignore_index=True, sort=False)
+        if signal_frames
+        else pd.DataFrame()
+    )
+    predictions = (
+        pd.concat(prediction_frames, ignore_index=True, sort=False)
+        if prediction_frames
+        else pd.DataFrame()
+    )
+    if predictions.empty:
+        return order_columns(signals)
+    if signals.empty:
+        predictions.insert(0, "source_file", predictions.pop("prediction_source_file"))
+        return order_columns(predictions)
 
-    return order_columns(pd.concat(frames, ignore_index=True, sort=False))
+    signal_code = _code_column(signals)
+    prediction_code = _code_column(predictions)
+    if not signal_code or not prediction_code:
+        predictions.insert(0, "source_file", predictions.pop("prediction_source_file"))
+        return order_columns(pd.concat([signals, predictions], ignore_index=True, sort=False))
+
+    predictions = predictions.drop_duplicates(prediction_code, keep="first").copy()
+    annotation_columns = [
+        prediction_code,
+        "prediction_source_file",
+        *[column for column in PREDICTION_COLUMNS if column in predictions.columns],
+    ]
+    annotated = signals.merge(
+        predictions[annotation_columns],
+        how="left",
+        left_on=signal_code,
+        right_on=prediction_code,
+        suffixes=("", "_prediction"),
+    )
+    if prediction_code != signal_code:
+        annotated = annotated.drop(columns=[prediction_code])
+
+    matched_codes = set(signals[signal_code].dropna().astype(str).str.strip().str.upper())
+    unmatched = predictions[
+        ~predictions[prediction_code].fillna("").astype(str).str.strip().str.upper().isin(matched_codes)
+    ].copy()
+    if not unmatched.empty:
+        unmatched["source_file"] = unmatched["prediction_source_file"]
+        annotated = pd.concat([annotated, unmatched], ignore_index=True, sort=False)
+
+    if "prediction_rank" in annotated.columns:
+        annotated = annotated.sort_values(
+            ["prediction_rank"], ascending=True, na_position="last", kind="stable"
+        )
+    return order_columns(annotated.reset_index(drop=True))
 
 
 def infer_ts_code(symbol: str) -> str | None:

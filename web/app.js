@@ -70,6 +70,9 @@ const primaryColumns = [
   "trade_date",
   "date",
   "industry",
+  "prediction_rank",
+  "prob_up",
+  "reasons",
   "close",
   "vol_ratio",
   "j",
@@ -80,7 +83,7 @@ const primaryColumns = [
   "days_since",
 ];
 
-const hiddenColumns = new Set(["source_file"]);
+const hiddenColumns = new Set(["source_file", "prediction_source_file"]);
 
 const codeColumns = new Set([
   "ts_code",
@@ -132,6 +135,11 @@ const labelMap = {
   trade_date: "日期",
   date: "日期",
   industry: "行业",
+  prediction_rank: "预测排名",
+  prob_up: "上涨概率",
+  reasons: "预测依据",
+  next_trade_date: "预测交易日",
+  prediction_source_file: "预测来源",
   close: "收盘",
   vol_ratio: "量比",
   j: "KDJ J",
@@ -1042,8 +1050,16 @@ function renderTable(columns, rows) {
     for (const column of columns) {
       const td = document.createElement("td");
       td.dataset.col = column;
-      td.textContent = row[column] ?? "";
-      td.title = row[column] ?? "";
+      const rawValue = row[column] ?? "";
+      if (column === "prob_up" && rawValue !== "") {
+        const probability = Number(rawValue);
+        td.textContent = Number.isFinite(probability) ? `${(probability * 100).toFixed(1)}%` : rawValue;
+        td.className = "prediction-probability";
+        if (Number.isFinite(probability) && probability >= 0.6) td.classList.add("prediction-high");
+      } else {
+        td.textContent = rawValue;
+      }
+      td.title = String(rawValue);
       rowEl.append(td);
     }
     els.tableBody.append(rowEl);
@@ -1103,8 +1119,16 @@ function renderMobile(columns, rows) {
       const label = document.createElement("span");
       label.textContent = labelOf(column);
       const value = document.createElement("strong");
-      value.textContent = row[column] ?? "";
-      value.title = row[column] ?? "";
+      const rawValue = row[column] ?? "";
+      if (column === "prob_up" && rawValue !== "") {
+        const probability = Number(rawValue);
+        value.textContent = Number.isFinite(probability) ? `${(probability * 100).toFixed(1)}%` : rawValue;
+        value.className = "prediction-probability";
+        if (Number.isFinite(probability) && probability >= 0.6) value.classList.add("prediction-high");
+      } else {
+        value.textContent = rawValue;
+      }
+      value.title = String(rawValue);
       metric.append(label, value);
       grid.append(metric);
     }

@@ -991,3 +991,26 @@ td[data-col="bull_bear"] {
     display: block;
   }
 }
+
+/* Next-day prediction emphasis in stock lists. */
+td[data-col="prediction_rank"],
+td[data-col="prob_up"] {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+td[data-col="reasons"] {
+  max-width: 320px;
+}
+
+.prediction-probability {
+  color: #b54708;
+  font-weight: 800;
+}
+
+.prediction-high {
+  color: #c4320a;
+  background: #fff0e8;
+  border-radius: 999px;
+  padding: 3px 7px;
+}
