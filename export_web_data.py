@@ -109,6 +109,18 @@ def _code_column(df: pd.DataFrame) -> str | None:
     return None
 
 
+def normalize_stock_code(value: object) -> str:
+    """Return a canonical stock key so symbols and ts_codes join reliably."""
+    if pd.isna(value):
+        return ""
+    code = str(value).strip().upper()
+    if TS_CODE_RE.match(code):
+        return code
+    if SYMBOL_RE.match(code):
+        return infer_ts_code(code) or code
+    return code
+
+
 def combine_files(paths: list[Path]) -> pd.DataFrame:
     """Combine daily signals and annotate them with next-day predictions.
 
@@ -151,30 +163,29 @@ def combine_files(paths: list[Path]) -> pd.DataFrame:
         predictions.insert(0, "source_file", predictions.pop("prediction_source_file"))
         return order_columns(pd.concat([signals, predictions], ignore_index=True, sort=False))
 
-    predictions = predictions.drop_duplicates(prediction_code, keep="first").copy()
+    join_key = "__stock_code_key"
+    signals[join_key] = signals[signal_code].map(normalize_stock_code)
+    predictions[join_key] = predictions[prediction_code].map(normalize_stock_code)
+    predictions = predictions.drop_duplicates(join_key, keep="first").copy()
     annotation_columns = [
-        prediction_code,
+        join_key,
         "prediction_source_file",
         *[column for column in PREDICTION_COLUMNS if column in predictions.columns],
     ]
     annotated = signals.merge(
         predictions[annotation_columns],
         how="left",
-        left_on=signal_code,
-        right_on=prediction_code,
+        on=join_key,
         suffixes=("", "_prediction"),
     )
-    if prediction_code != signal_code:
-        annotated = annotated.drop(columns=[prediction_code])
 
-    matched_codes = set(signals[signal_code].dropna().astype(str).str.strip().str.upper())
-    unmatched = predictions[
-        ~predictions[prediction_code].fillna("").astype(str).str.strip().str.upper().isin(matched_codes)
-    ].copy()
+    matched_codes = set(signals[join_key])
+    unmatched = predictions[~predictions[join_key].isin(matched_codes)].copy()
     if not unmatched.empty:
         unmatched["source_file"] = unmatched["prediction_source_file"]
         annotated = pd.concat([annotated, unmatched], ignore_index=True, sort=False)
 
+    annotated = annotated.drop(columns=[join_key])
     if "prediction_rank" in annotated.columns:
         annotated = annotated.sort_values(
             ["prediction_rank"], ascending=True, na_position="last", kind="stable"

@@ -995,17 +995,27 @@ td[data-col="bull_bear"] {
 /* Next-day prediction emphasis in stock lists. */
 td[data-col="prediction_rank"],
 td[data-col="prob_up"] {
+  min-width: 88px;
+  overflow: visible;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
 td[data-col="reasons"] {
-  max-width: 320px;
+  width: 320px;
+  min-width: 240px;
+  max-width: 420px;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  line-height: 1.55;
 }
 
 .prediction-probability {
+  display: inline-block;
   color: #b54708;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .prediction-high {
@@ -1013,4 +1023,24 @@ td[data-col="reasons"] {
   background: #fff0e8;
   border-radius: 999px;
   padding: 3px 7px;
+}
+
+.prediction-probability-metric,
+.prediction-reasons {
+  align-self: start;
+}
+
+.prediction-probability-metric strong {
+  overflow: visible;
+}
+
+.prediction-reasons {
+  grid-column: 1 / -1;
+}
+
+.prediction-reasons strong {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  line-height: 1.55;
 }

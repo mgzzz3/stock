@@ -1053,9 +1053,11 @@ function renderTable(columns, rows) {
       const rawValue = row[column] ?? "";
       if (column === "prob_up" && rawValue !== "") {
         const probability = Number(rawValue);
-        td.textContent = Number.isFinite(probability) ? `${(probability * 100).toFixed(1)}%` : rawValue;
-        td.className = "prediction-probability";
-        if (Number.isFinite(probability) && probability >= 0.6) td.classList.add("prediction-high");
+        const badge = document.createElement("span");
+        badge.className = "prediction-probability";
+        badge.textContent = Number.isFinite(probability) ? `${(probability * 100).toFixed(1)}%` : rawValue;
+        if (Number.isFinite(probability) && probability >= 0.6) badge.classList.add("prediction-high");
+        td.append(badge);
       } else {
         td.textContent = rawValue;
       }
@@ -1116,15 +1118,19 @@ function renderMobile(columns, rows) {
     for (const column of metricColumns) {
       const metric = document.createElement("div");
       metric.className = "metric";
+      if (column === "reasons") metric.classList.add("prediction-reasons");
+      if (column === "prob_up") metric.classList.add("prediction-probability-metric");
       const label = document.createElement("span");
       label.textContent = labelOf(column);
       const value = document.createElement("strong");
       const rawValue = row[column] ?? "";
       if (column === "prob_up" && rawValue !== "") {
         const probability = Number(rawValue);
-        value.textContent = Number.isFinite(probability) ? `${(probability * 100).toFixed(1)}%` : rawValue;
-        value.className = "prediction-probability";
-        if (Number.isFinite(probability) && probability >= 0.6) value.classList.add("prediction-high");
+        const badge = document.createElement("span");
+        badge.className = "prediction-probability";
+        badge.textContent = Number.isFinite(probability) ? `${(probability * 100).toFixed(1)}%` : rawValue;
+        if (Number.isFinite(probability) && probability >= 0.6) badge.classList.add("prediction-high");
+        value.append(badge);
       } else {
         value.textContent = rawValue;
       }

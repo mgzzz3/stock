@@ -51,6 +51,28 @@ class CombineWebDataTests(unittest.TestCase):
         self.assertTrue(pd.isna(predicted.loc["000001.SZ", "prob_up"]))
         self.assertEqual(len(combined), 3)
 
+    def test_predictions_match_signal_rows_across_code_formats(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            signal_path = root / "signals" / "b1_20260609.csv"
+            prediction_path = root / "predictions" / "next_day_20260609.csv"
+            signal_path.parent.mkdir()
+            prediction_path.parent.mkdir()
+
+            pd.DataFrame(
+                [{"stock_code": "000002", "name": "万科A", "close": 8.0}]
+            ).to_csv(signal_path, index=False)
+            pd.DataFrame(
+                [{"ts_code": "000002.SZ", "prob_up": 0.68, "reasons": "短期动量"}]
+            ).to_csv(prediction_path, index=False)
+
+            combined = combine_files([signal_path, prediction_path])
+
+        self.assertEqual(len(combined), 1)
+        self.assertEqual(combined.loc[0, "stock_code"], "000002")
+        self.assertAlmostEqual(float(combined.loc[0, "prob_up"]), 0.68)
+        self.assertEqual(combined.loc[0, "prediction_rank"], 1)
+
     def test_regular_csvs_still_concatenate_without_prediction_columns(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
