@@ -3,7 +3,14 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from strategy.next_day import FEATURES, build_dataset, fit_model, score_rows, train_and_score
+from strategy.next_day import (
+    FEATURES,
+    build_dataset,
+    fit_model,
+    prediction_table,
+    score_rows,
+    train_and_score,
+)
 
 
 class NextDayTests(unittest.TestCase):
@@ -65,6 +72,43 @@ class NextDayTests(unittest.TestCase):
 
         self.assertTrue(np.allclose(model.weights, changed_model.weights))
         self.assertTrue(np.allclose(scored["prob_up"], changed_scored["prob_up"]))
+
+    def test_prediction_table_only_scores_b1_pool_members(self):
+        dataset = build_dataset(self.make_bars())
+        signal_date = str(dataset["trade_date"].max())
+        b1_codes = ["000002.SZ", "000007.SZ"]
+        b1_pool = pd.DataFrame({
+            "ts_code": b1_codes,
+            "trade_date": [signal_date, signal_date],
+        })
+
+        _, picks = prediction_table(
+            dataset,
+            b1_pool,
+            signal_date,
+            top=0,
+            train_days=50,
+            min_training_rows=100,
+            min_amount=0,
+        )
+
+        self.assertEqual(set(picks["ts_code"]), set(b1_codes))
+        self.assertEqual(set(picks["prediction_pool"]), {"b1"})
+
+    def test_prediction_table_requires_persisted_b1_pool(self):
+        dataset = build_dataset(self.make_bars())
+        signal_date = str(dataset["trade_date"].max())
+        empty_pool = pd.DataFrame(columns=["ts_code", "trade_date"])
+
+        with self.assertRaisesRegex(ValueError, "strategy.b1"):
+            prediction_table(
+                dataset,
+                empty_pool,
+                signal_date,
+                train_days=50,
+                min_training_rows=100,
+                min_amount=0,
+            )
 
     def test_positive_feature_contribution_increases_probability(self):
         rows = pd.DataFrame({feature: np.linspace(-1, 1, 200) for feature in FEATURES})

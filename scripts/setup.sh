@@ -20,7 +20,7 @@ echo "=== 2/5  trade_cal (交易日历) ==="
 uv run python -m ingest.trade_cal
 
 echo
-echo "=== 3/5  backfill (全量日线, 近365天) ==="
+echo "=== 3/5  backfill (全量日线, 默认近5年) ==="
 uv run python -m ingest.backfill
 
 echo
@@ -33,6 +33,7 @@ echo "=== 5/5  strategy + export ==="
 uv run python -m strategy.b1
 uv run python -m indicators.golden_pit
 uv run python -m strategy.b1_annotate_gp
+uv run python -m strategy.next_day predict
 uv run python export_web_data.py
 
 echo
