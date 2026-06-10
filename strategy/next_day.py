@@ -67,6 +67,7 @@ FEATURE_LABELS = {
 EPSILON = 1e-12
 DEFAULT_TRAIN_DAYS = 756
 B1_STRATEGY = "b1"
+DEFAULT_B1_DIR = Path(__file__).resolve().parents[1] / "data" / "signals"
 
 
 @dataclass
@@ -104,19 +105,45 @@ def load_bars(start: str | None = None, end: str | None = None) -> pd.DataFrame:
         return pd.read_sql_query(sql, conn, params=params)
 
 
-def load_b1_pool(start: str | None = None, end: str | None = None) -> pd.DataFrame:
-    """读取已持久化的 B1 股票池成员，供预测和回测按日筛选候选。"""
-    sql = "SELECT ts_code, trade_date FROM signals WHERE strategy = ?"
-    params: list[str] = [B1_STRATEGY]
-    if start:
-        sql += " AND trade_date >= ?"
-        params.append(start)
-    if end:
-        sql += " AND trade_date <= ?"
-        params.append(end)
-    sql += " ORDER BY trade_date, ts_code"
-    with connect() as conn:
-        return pd.read_sql_query(sql, conn, params=params)
+def load_b1_pool(
+    start: str | None = None,
+    end: str | None = None,
+    *,
+    signal_dir: Path = DEFAULT_B1_DIR,
+) -> pd.DataFrame:
+    """从每日 ``b1_YYYYMMDD.csv`` 读取预测候选池。
+
+    CSV 是每日筛选结果的最终产物，也是 Web 页面展示的股票集合。不能从
+    ``signals`` 表读取：同一天重跑筛选时，数据库中的旧命中记录不会自动删除，
+    会让预测混入已经不在当日 CSV 中的股票。
+    """
+    frames: list[pd.DataFrame] = []
+    for path in sorted(signal_dir.glob("b1_*.csv")):
+        signal_date = path.stem.removeprefix("b1_")
+        if len(signal_date) != 8 or not signal_date.isdigit():
+            continue
+        if start and signal_date < start:
+            continue
+        if end and signal_date > end:
+            continue
+
+        frame = pd.read_csv(path, dtype=str, encoding="utf-8-sig")
+        if "ts_code" not in frame.columns:
+            raise ValueError(f"B1 股票池文件缺少 ts_code 列：{path}")
+        pool = frame[["ts_code"]].copy()
+        pool["ts_code"] = pool["ts_code"].str.strip().str.upper()
+        pool = pool[pool["ts_code"].notna() & pool["ts_code"].ne("")]
+        pool["trade_date"] = signal_date
+        frames.append(pool)
+
+    if not frames:
+        return pd.DataFrame(columns=["ts_code", "trade_date"])
+    return (
+        pd.concat(frames, ignore_index=True)
+        .drop_duplicates(["trade_date", "ts_code"])
+        .sort_values(["trade_date", "ts_code"])
+        .reset_index(drop=True)
+    )
 
 
 def _pool_codes(b1_pool: pd.DataFrame, signal_date: str) -> set[str]:
@@ -297,7 +324,7 @@ def prediction_table(
     codes = _pool_codes(b1_pool, signal_date)
     if not codes:
         raise ValueError(
-            f"{signal_date} 没有已持久化的 B1 股票池；请先运行 "
+            f"{signal_date} 没有对应的 data/signals/b1_{signal_date}.csv 股票池，或文件为空；请先运行 "
             f"`uv run python -m strategy.b1 {signal_date}`"
         )
     model, scored = train_and_score(
