@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A 股信号浏览</title>
-    <link rel="stylesheet" href="styles.css?v=prediction-list-2" />
+    <link rel="stylesheet" href="styles.css?v=prediction-list-3" />
   </head>
   <body>
     <main class="shell">
@@ -46,6 +46,17 @@
           <div class="summary-meta" id="summaryMeta">--</div>
         </div>
       </section>
+
+      <div class="prediction-toolbar" id="predictionToolbar" hidden>
+        <div>
+          <strong id="predictionTitle">B1 次日预测</strong>
+          <span id="predictionMeta">--</span>
+        </div>
+        <div class="prediction-filters" aria-label="股票列表范围">
+          <button id="predictionOnly" type="button">仅看预测</button>
+          <button id="showAllStocks" type="button">全部 B1 股票池</button>
+        </div>
+      </div>
 
       <section class="industry-panel" aria-label="行业板块趋势">
         <div class="section-head">
@@ -146,6 +157,6 @@
       </section>
     </main>
 
-    <script src="app.js?v=prediction-list-2" defer></script>
+    <script src="app.js?v=prediction-list-3" defer></script>
   </body>
 </html>

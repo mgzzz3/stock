@@ -1044,3 +1044,67 @@ td[data-col="reasons"] {
   white-space: normal;
   line-height: 1.55;
 }
+
+.prediction-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border: 1px solid #f2c6a8;
+  border-radius: 10px;
+  background: #fff8f2;
+}
+
+.prediction-toolbar > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.prediction-toolbar strong {
+  color: #9a3412;
+  font-size: 15px;
+}
+
+.prediction-toolbar span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.prediction-filters {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.prediction-filters button {
+  height: 32px;
+  border: 1px solid #e7b28d;
+  border-radius: 8px;
+  background: #fff;
+  color: #9a3412;
+  padding: 0 10px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.prediction-filters button.active {
+  border-color: #c2410c;
+  background: #c2410c;
+  color: #fff;
+}
+
+@media (max-width: 760px) {
+  .prediction-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .prediction-filters button {
+    flex: 1;
+  }
+}
