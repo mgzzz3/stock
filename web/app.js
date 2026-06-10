@@ -11,6 +11,7 @@ const state = {
   dateColumns: [],
   dateRows: [],
   selectedIndustry: null,
+  listFilter: "all",
 };
 
 const els = {
@@ -53,6 +54,11 @@ const els = {
   detailLoading: document.querySelector("#detailLoading"),
   detailError: document.querySelector("#detailError"),
   industryPanel: document.querySelector(".industry-panel"),
+  predictionToolbar: document.querySelector("#predictionToolbar"),
+  predictionTitle: document.querySelector("#predictionTitle"),
+  predictionMeta: document.querySelector("#predictionMeta"),
+  predictionOnly: document.querySelector("#predictionOnly"),
+  showAllStocks: document.querySelector("#showAllStocks"),
 };
 
 const primaryColumns = [
@@ -599,6 +605,7 @@ function showIndustryStocks(industry, date = state.selectedDate) {
   els.searchInput.value = "";
   els.industryBack.hidden = false;
   els.industryPanel.hidden = true;
+  els.predictionToolbar.hidden = true;
   els.detailPanel.hidden = true;
   els.listPanel.hidden = false;
   els.modeLabel.textContent = "行业";
@@ -682,6 +689,7 @@ function showListView() {
 function showStockDetail(tsCode, name) {
   els.listPanel.hidden = true;
   els.industryPanel.hidden = true;
+  els.predictionToolbar.hidden = true;
   els.detailPanel.hidden = false;
   els.detailName.textContent = name || "--";
   els.detailCode.textContent = tsCode;
@@ -716,6 +724,7 @@ function showStockDetail(tsCode, name) {
 
 function backToList() {
   showListView();
+  updatePredictionToolbar();
 }
 
 els.detailBack.addEventListener("click", backToList);
@@ -1144,6 +1153,43 @@ function renderMobile(columns, rows) {
   }
 }
 
+function hasPrediction(row) {
+  return row.prediction_rank !== "" && row.prediction_rank !== null && row.prediction_rank !== undefined;
+}
+
+function predictionRows(rows) {
+  return rows.filter(hasPrediction);
+}
+
+function updatePredictionToolbar() {
+  const predictions = predictionRows(state.dateRows);
+  const isDateView = state.mode === "date";
+  els.predictionToolbar.hidden = !isDateView || predictions.length === 0;
+  if (!isDateView || predictions.length === 0) return;
+
+  const targetDates = [...new Set(predictions.map((row) => row.next_trade_date).filter(Boolean))];
+  const targetText = targetDates.length === 1 ? ` · 预测 ${displayDate(String(targetDates[0]))}` : "";
+  els.predictionMeta.textContent = `${predictions.length} 只${targetText} · B1 股票池共 ${state.dateRows.length} 只`;
+  els.predictionOnly.classList.toggle("active", state.listFilter === "predictions");
+  els.showAllStocks.classList.toggle("active", state.listFilter === "all");
+  els.predictionOnly.setAttribute("aria-pressed", String(state.listFilter === "predictions"));
+  els.showAllStocks.setAttribute("aria-pressed", String(state.listFilter === "all"));
+}
+
+function applyListFilter(filter) {
+  if (!state.dateRows.length) return;
+  state.listFilter = filter === "predictions" ? "predictions" : "all";
+  state.rows = state.listFilter === "predictions" ? predictionRows(state.dateRows) : state.dateRows;
+  els.emptyState.hidden = state.rows.length > 0;
+  els.summaryMeta.textContent = state.listFilter === "predictions"
+    ? `${state.rows.length} 条 B1 次日预测 · 股票池共 ${state.dateRows.length} 只`
+    : `${state.rows.length} 只 B1 股票 · 其中 ${predictionRows(state.dateRows).length} 只有次日预测`;
+  updatePredictionToolbar();
+  renderTable(state.columns, state.rows);
+  renderMobile(state.columns, state.rows);
+  els.listPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function renderData(payload) {
   syncDates(payload);
   state.mode = payload.mode || state.mode;
@@ -1151,13 +1197,18 @@ function renderData(payload) {
   els.industryBack.hidden = true;
   showListView();
   state.columns = orderedColumns(payload.columns || []);
-  state.rows = payload.rows || [];
+  const payloadRows = payload.rows || [];
+  state.rows = payloadRows;
   if (state.mode === "date") {
     state.dateColumns = state.columns;
-    state.dateRows = state.rows;
+    state.dateRows = payloadRows;
+    state.listFilter = predictionRows(payloadRows).length ? "predictions" : "all";
+    state.rows = state.listFilter === "predictions" ? predictionRows(payloadRows) : payloadRows;
+  } else {
+    state.listFilter = "all";
   }
 
-  const rowCount = payload.row_count ?? state.rows.length;
+  const rowCount = state.rows.length;
   els.emptyState.hidden = rowCount > 0;
   els.emptyState.textContent = "没有匹配的数据";
 
@@ -1175,6 +1226,7 @@ function renderData(payload) {
   }
 
   renderDateTabs();
+  updatePredictionToolbar();
   if (state.mode === "date" && state.industryTrends) {
     renderIndustryPanel(state.industryTrends);
   }
@@ -1268,6 +1320,9 @@ async function init() {
     setError(error);
   }
 }
+
+els.predictionOnly.addEventListener("click", () => applyListFilter("predictions"));
+els.showAllStocks.addEventListener("click", () => applyListFilter("all"));
 
 els.searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
