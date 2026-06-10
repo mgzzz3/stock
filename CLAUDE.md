@@ -43,7 +43,7 @@ uv run python -m ingest.daily 000001.SZ 20240101 20241231  # one stock across a 
 uv run python -m ingest.daily --range 20260501 20260514    # range, all stocks (uses fetch_range)
 
 # Daily bars — bulk
-uv run python -m ingest.backfill                    # last 365 days → today
+uv run python -m ingest.backfill                    # last 5 years → today
 uv run python -m ingest.backfill 20250101 20260101  # custom range
 uv run python -m ingest.incremental                 # max(trade_date) in DB → today
 ```
@@ -55,7 +55,7 @@ uv run python -m ingest.incremental                 # max(trade_date) in DB → 
 - detects rate-limit errors (`频率超限`) and sleeps a full **60s** before retrying — exponential backoff is used for other errors,
 - is **idempotent** (`ON CONFLICT DO UPDATE`) — safe to re-run after interruption.
 
-A full-year backfill (~250 trading days + a few holidays) takes ~6 minutes at the safe pacing.
+The default five-year backfill takes roughly 25–35 minutes at the safe pacing, depending on holidays and rate limits.
 
 ### Tushare rate limit (critical)
 
@@ -72,7 +72,7 @@ The `daily` endpoint is throttled to **50 calls/minute** at the current account 
 ```bash
 uv sync --system-certs
 uv run python -m ingest.stock_basic    # one-shot, list of A-share tickers
-uv run python -m ingest.backfill       # one-shot, ~3 min, last 365 days of daily bars
+uv run python -m ingest.backfill       # one-shot, default last 5 years of daily bars
 ```
 
 **Ongoing**

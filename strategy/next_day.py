@@ -13,6 +13,8 @@
     uv run python -m strategy.next_day predict 20260601    # 用 06-01 收盘数据预测 06-02
     uv run python -m strategy.next_day review 20260601     # 复盘 06-01 → 06-02
     uv run python -m strategy.next_day backtest 20260101 20260601
+
+预测候选严格来自信号日的 B1 股票池；默认使用约 3 个交易年的历史样本训练。
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ import argparse
 import json
 import math
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -62,6 +65,8 @@ FEATURE_LABELS = {
 }
 
 EPSILON = 1e-12
+DEFAULT_TRAIN_DAYS = 756
+B1_STRATEGY = "b1"
 
 
 @dataclass
@@ -97,6 +102,28 @@ def load_bars(start: str | None = None, end: str | None = None) -> pd.DataFrame:
     sql += " ORDER BY d.ts_code, d.trade_date"
     with connect() as conn:
         return pd.read_sql_query(sql, conn, params=params)
+
+
+def load_b1_pool(start: str | None = None, end: str | None = None) -> pd.DataFrame:
+    """读取已持久化的 B1 股票池成员，供预测和回测按日筛选候选。"""
+    sql = "SELECT ts_code, trade_date FROM signals WHERE strategy = ?"
+    params: list[str] = [B1_STRATEGY]
+    if start:
+        sql += " AND trade_date >= ?"
+        params.append(start)
+    if end:
+        sql += " AND trade_date <= ?"
+        params.append(end)
+    sql += " ORDER BY trade_date, ts_code"
+    with connect() as conn:
+        return pd.read_sql_query(sql, conn, params=params)
+
+
+def _pool_codes(b1_pool: pd.DataFrame, signal_date: str) -> set[str]:
+    if b1_pool.empty:
+        return set()
+    rows = b1_pool[b1_pool["trade_date"].astype(str) == signal_date]
+    return set(rows["ts_code"].dropna().astype(str))
 
 
 def build_dataset(bars: pd.DataFrame) -> pd.DataFrame:
@@ -224,7 +251,7 @@ def train_and_score(
     dataset: pd.DataFrame,
     signal_date: str,
     *,
-    train_days: int = 252,
+    train_days: int = DEFAULT_TRAIN_DAYS,
     min_training_rows: int = 1000,
 ) -> tuple[Model, pd.DataFrame]:
     """以 signal_date 收盘时可获得的数据训练并评分。"""
@@ -259,31 +286,44 @@ def _tradable(rows: pd.DataFrame, min_amount: float) -> pd.DataFrame:
 
 def prediction_table(
     dataset: pd.DataFrame,
+    b1_pool: pd.DataFrame,
     signal_date: str,
     *,
-    top: int = 20,
-    train_days: int = 252,
+    top: int = 0,
+    train_days: int = DEFAULT_TRAIN_DAYS,
     min_training_rows: int = 1000,
     min_amount: float = 20_000.0,
 ) -> tuple[Model, pd.DataFrame]:
+    codes = _pool_codes(b1_pool, signal_date)
+    if not codes:
+        raise ValueError(
+            f"{signal_date} 没有已持久化的 B1 股票池；请先运行 "
+            f"`uv run python -m strategy.b1 {signal_date}`"
+        )
     model, scored = train_and_score(
         dataset, signal_date, train_days=train_days, min_training_rows=min_training_rows
     )
+    scored = scored[scored["ts_code"].isin(codes)].copy()
     scored = _tradable(scored, min_amount)
+    scored["prediction_pool"] = B1_STRATEGY
     columns = [
         "trade_date", "next_trade_date", "ts_code", "name", "industry", "close",
-        "amount", "prob_up", "reasons", "next_ret", "target",
+        "amount", "prediction_pool", "prob_up", "reasons", "next_ret", "target",
     ]
-    return model, scored.sort_values("prob_up", ascending=False).head(top)[columns]
+    ranked = scored.sort_values("prob_up", ascending=False)
+    if top > 0:
+        ranked = ranked.head(top)
+    return model, ranked[columns]
 
 
 def walk_forward_backtest(
     dataset: pd.DataFrame,
+    b1_pool: pd.DataFrame,
     start: str,
     end: str,
     *,
-    top: int = 20,
-    train_days: int = 252,
+    top: int = 0,
+    train_days: int = DEFAULT_TRAIN_DAYS,
     min_training_rows: int = 1000,
     min_amount: float = 20_000.0,
 ) -> pd.DataFrame:
@@ -296,6 +336,7 @@ def walk_forward_backtest(
         try:
             _, picks = prediction_table(
                 dataset,
+                b1_pool,
                 signal_date,
                 top=top,
                 train_days=train_days,
@@ -361,7 +402,8 @@ def _report_backtest(rows: pd.DataFrame, top: int) -> None:
         mean_return=("next_ret", "mean"),
     )
     baseline = rows["target"].mean()
-    print(f"滚动回测：{daily.index.min()} → {daily.index.max()}，每日 Top {top}")
+    scope = f"每日 Top {top}" if top > 0 else "每日全部 B1 入池股票"
+    print(f"滚动回测：{daily.index.min()} → {daily.index.max()}，{scope}")
     print(f"预测日数 {len(daily)}，股票日样本 {len(rows):,}")
     print(f"平均命中率 {baseline:.1%}，平均次日开收到收收益 {rows['next_ret'].mean():+.3%}")
     print(f"盈利交易日占比 {(daily['mean_return'] > 0).mean():.1%}")
@@ -371,8 +413,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", nargs="?", choices=("predict", "review", "backtest"), default="predict")
     parser.add_argument("dates", nargs="*", help="predict/review: 信号日；backtest: 开始日 结束日")
-    parser.add_argument("--top", type=int, default=20, help="每日输出前 N 只，默认 20")
-    parser.add_argument("--train-days", type=int, default=252, help="滚动训练交易日数，默认 252")
+    parser.add_argument("--top", type=int, default=0, help="B1 池内最多输出 N 只；0 表示全部（默认）")
+    parser.add_argument(
+        "--train-days", type=int, default=DEFAULT_TRAIN_DAYS,
+        help=f"滚动训练交易日数，默认 {DEFAULT_TRAIN_DAYS}（约 3 年）",
+    )
     parser.add_argument("--min-training-rows", type=int, default=1000)
     parser.add_argument("--min-amount", type=float, default=20_000.0, help="最低成交额（Tushare 千元）")
     parser.add_argument("--output", type=Path)
@@ -381,16 +426,38 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    bars = load_bars()
-    if bars.empty:
+    with connect() as conn:
+        row = conn.execute("SELECT MAX(trade_date) FROM daily").fetchone()
+    latest = str(row[0]) if row and row[0] else ""
+    if not latest:
         raise SystemExit("daily 表为空，请先运行数据更新")
-    dataset = build_dataset(bars)
-    latest = str(dataset["trade_date"].max())
 
     if args.command in {"predict", "review"}:
         signal_date = args.dates[0] if args.dates else latest
+        first_signal_date = signal_date
+        last_signal_date = signal_date
+    else:
+        if len(args.dates) != 2:
+            raise SystemExit("backtest 需要开始日和结束日，例如：backtest 20260101 20260601")
+        first_signal_date, last_signal_date = args.dates
+
+    warmup_days = 40
+    history_days = math.ceil(args.train_days * 1.7) + warmup_days
+    load_start = (
+        datetime.strptime(first_signal_date, "%Y%m%d") - timedelta(days=history_days)
+    ).strftime("%Y%m%d")
+    load_end = min(
+        latest,
+        (datetime.strptime(last_signal_date, "%Y%m%d") + timedelta(days=10)).strftime("%Y%m%d"),
+    )
+    bars = load_bars(start=load_start, end=load_end)
+    dataset = build_dataset(bars)
+    b1_pool = load_b1_pool(start=first_signal_date, end=last_signal_date)
+
+    if args.command in {"predict", "review"}:
         model, rows = prediction_table(
             dataset,
+            b1_pool,
             signal_date,
             top=args.top,
             train_days=args.train_days,
@@ -398,7 +465,10 @@ def main(argv: list[str] | None = None) -> int:
             min_amount=args.min_amount,
         )
         _print_model(model)
-        print(f"信号日 {signal_date}，预测目标：下一交易日开盘 → 收盘")
+        print(
+            f"信号日 {signal_date}，B1 股票池 {len(_pool_codes(b1_pool, signal_date))} 只，"
+            "预测目标：下一交易日开盘 → 收盘"
+        )
         _print_predictions(rows, review=args.command == "review")
         if args.command == "review" and rows["next_ret"].notna().any():
             known = rows.dropna(subset=["next_ret"])
@@ -407,10 +477,9 @@ def main(argv: list[str] | None = None) -> int:
         _save(rows, output, model)
         return 0
 
-    if len(args.dates) != 2:
-        raise SystemExit("backtest 需要开始日和结束日，例如：backtest 20260101 20260601")
     rows = walk_forward_backtest(
         dataset,
+        b1_pool,
         args.dates[0],
         args.dates[1],
         top=args.top,
