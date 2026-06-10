@@ -1169,7 +1169,7 @@ function updatePredictionToolbar() {
 
   const targetDates = [...new Set(predictions.map((row) => row.next_trade_date).filter(Boolean))];
   const targetText = targetDates.length === 1 ? ` · 预测 ${displayDate(String(targetDates[0]))}` : "";
-  els.predictionMeta.textContent = `${predictions.length} 只${targetText} · B1 股票池共 ${state.dateRows.length} 只`;
+  els.predictionMeta.textContent = `${predictions.length} 只${targetText} · 当日列表共 ${state.dateRows.length} 只`;
   els.predictionOnly.classList.toggle("active", state.listFilter === "predictions");
   els.showAllStocks.classList.toggle("active", state.listFilter === "all");
   els.predictionOnly.setAttribute("aria-pressed", String(state.listFilter === "predictions"));
@@ -1182,8 +1182,8 @@ function applyListFilter(filter) {
   state.rows = state.listFilter === "predictions" ? predictionRows(state.dateRows) : state.dateRows;
   els.emptyState.hidden = state.rows.length > 0;
   els.summaryMeta.textContent = state.listFilter === "predictions"
-    ? `${state.rows.length} 条 B1 次日预测 · 股票池共 ${state.dateRows.length} 只`
-    : `${state.rows.length} 只 B1 股票 · 其中 ${predictionRows(state.dateRows).length} 只有次日预测`;
+    ? `${state.rows.length} 条次日预测 · 当日列表共 ${state.dateRows.length} 只`
+    : `${state.rows.length} 条当日记录 · 其中 ${predictionRows(state.dateRows).length} 条有次日预测`;
   updatePredictionToolbar();
   renderTable(state.columns, state.rows);
   renderMobile(state.columns, state.rows);

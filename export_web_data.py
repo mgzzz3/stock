@@ -124,9 +124,9 @@ def normalize_stock_code(value: object) -> str:
 def combine_files(paths: list[Path]) -> pd.DataFrame:
     """Combine daily signals and annotate them with next-day predictions.
 
-    Prediction fields are merged only onto matching signal rows. Prediction-only
-    stocks are discarded so a daily page can never contain picks outside that
-    day's B1 CSV.
+    Prediction fields are merged onto matching signal rows. Prediction-only
+    picks are retained as standalone rows so a refreshed signal CSV cannot hide
+    predictions that were already generated for that trading date.
     """
     signal_frames: list[pd.DataFrame] = []
     prediction_frames: list[pd.DataFrame] = []
@@ -154,12 +154,14 @@ def combine_files(paths: list[Path]) -> pd.DataFrame:
     if predictions.empty:
         return order_columns(signals)
     if signals.empty:
-        return order_columns(signals)
+        predictions.insert(0, "source_file", predictions.pop("prediction_source_file"))
+        return order_columns(predictions)
 
     signal_code = _code_column(signals)
     prediction_code = _code_column(predictions)
     if not signal_code or not prediction_code:
-        return order_columns(signals)
+        predictions.insert(0, "source_file", predictions.pop("prediction_source_file"))
+        return order_columns(pd.concat([signals, predictions], ignore_index=True, sort=False))
 
     join_key = "__stock_code_key"
     signals[join_key] = signals[signal_code].map(normalize_stock_code)
@@ -176,6 +178,12 @@ def combine_files(paths: list[Path]) -> pd.DataFrame:
         on=join_key,
         suffixes=("", "_prediction"),
     )
+
+    matched_codes = set(signals[join_key])
+    unmatched = predictions[~predictions[join_key].isin(matched_codes)].copy()
+    if not unmatched.empty:
+        unmatched["source_file"] = unmatched["prediction_source_file"]
+        annotated = pd.concat([annotated, unmatched], ignore_index=True, sort=False)
 
     annotated = annotated.drop(columns=[join_key])
     if "prediction_rank" in annotated.columns:
