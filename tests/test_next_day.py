@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -7,6 +9,7 @@ from strategy.next_day import (
     FEATURES,
     build_dataset,
     fit_model,
+    load_b1_pool,
     prediction_table,
     score_rows,
     train_and_score,
@@ -72,6 +75,23 @@ class NextDayTests(unittest.TestCase):
 
         self.assertTrue(np.allclose(model.weights, changed_model.weights))
         self.assertTrue(np.allclose(scored["prob_up"], changed_scored["prob_up"]))
+
+    def test_load_b1_pool_uses_daily_csv_instead_of_database_rows(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            signal_dir = Path(temp_dir)
+            pd.DataFrame({
+                "ts_code": ["000002.SZ", "000007.SZ"],
+                "name": ["万科A", "全新好"],
+            }).to_csv(signal_dir / "b1_20260609.csv", index=False, encoding="utf-8-sig")
+            pd.DataFrame({
+                "ts_code": ["920510.BJ"],
+            }).to_csv(signal_dir / "b1_20260610.csv", index=False)
+
+            pool = load_b1_pool("20260609", "20260609", signal_dir=signal_dir)
+
+        self.assertEqual(set(pool["ts_code"]), {"000002.SZ", "000007.SZ"})
+        self.assertEqual(set(pool["trade_date"]), {"20260609"})
+        self.assertNotIn("920510.BJ", set(pool["ts_code"]))
 
     def test_prediction_table_only_scores_b1_pool_members(self):
         dataset = build_dataset(self.make_bars())

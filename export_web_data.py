@@ -124,9 +124,9 @@ def normalize_stock_code(value: object) -> str:
 def combine_files(paths: list[Path]) -> pd.DataFrame:
     """Combine daily signals and annotate them with next-day predictions.
 
-    Prediction CSVs used to be concatenated as sparse, duplicate stock rows.  They
-    are now merged onto matching signal rows, while prediction-only picks remain
-    visible as standalone rows.
+    Prediction fields are merged only onto matching signal rows. Prediction-only
+    stocks are discarded so a daily page can never contain picks outside that
+    day's B1 CSV.
     """
     signal_frames: list[pd.DataFrame] = []
     prediction_frames: list[pd.DataFrame] = []
@@ -154,14 +154,12 @@ def combine_files(paths: list[Path]) -> pd.DataFrame:
     if predictions.empty:
         return order_columns(signals)
     if signals.empty:
-        predictions.insert(0, "source_file", predictions.pop("prediction_source_file"))
-        return order_columns(predictions)
+        return order_columns(signals)
 
     signal_code = _code_column(signals)
     prediction_code = _code_column(predictions)
     if not signal_code or not prediction_code:
-        predictions.insert(0, "source_file", predictions.pop("prediction_source_file"))
-        return order_columns(pd.concat([signals, predictions], ignore_index=True, sort=False))
+        return order_columns(signals)
 
     join_key = "__stock_code_key"
     signals[join_key] = signals[signal_code].map(normalize_stock_code)
@@ -178,12 +176,6 @@ def combine_files(paths: list[Path]) -> pd.DataFrame:
         on=join_key,
         suffixes=("", "_prediction"),
     )
-
-    matched_codes = set(signals[join_key])
-    unmatched = predictions[~predictions[join_key].isin(matched_codes)].copy()
-    if not unmatched.empty:
-        unmatched["source_file"] = unmatched["prediction_source_file"]
-        annotated = pd.concat([annotated, unmatched], ignore_index=True, sort=False)
 
     annotated = annotated.drop(columns=[join_key])
     if "prediction_rank" in annotated.columns:
