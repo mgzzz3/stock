@@ -39,6 +39,25 @@ WEIGHTS = {
 }
 
 
+CREATE_HISTORY_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS sector_ranking_history (
+        trade_date TEXT NOT NULL,
+        industry TEXT NOT NULL,
+        score REAL,
+        rank INTEGER,
+        return_5d REAL,
+        return_10d REAL,
+        return_20d REAL,
+        turnover REAL,
+        breadth REAL,
+        new_high_ratio REAL,
+        concentration REAL,
+        relative_strength REAL,
+        PRIMARY KEY (trade_date, industry)
+    )
+"""
+
+
 # ── 直连数据库加载（比 loader.load_all 走 CSV 快得多） ──
 
 def load_from_db(dates_needed):
@@ -206,23 +225,7 @@ def compute_one_date(df, trade_date):
 
 def save_one_date(date_str, rankings_df):
     with connect() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS sector_ranking_history (
-                trade_date TEXT NOT NULL,
-                industry TEXT NOT NULL,
-                score REAL,
-                rank INTEGER,
-                return_5d REAL,
-                return_10d REAL,
-                return_20d REAL,
-                turnover REAL,
-                breadth REAL,
-                new_high_ratio REAL,
-                concentration REAL,
-                relative_strength REAL,
-                PRIMARY KEY (trade_date, industry)
-            )
-        """)
+        conn.execute(CREATE_HISTORY_TABLE_SQL)
         for idx, row in rankings_df.iterrows():
             conn.execute("""
                 INSERT OR REPLACE INTO sector_ranking_history
@@ -245,12 +248,17 @@ def save_one_date(date_str, rankings_df):
 def backfill(target_dates=None):
     """补充主线排行数据"""
     with connect() as conn:
+        conn.execute(CREATE_HISTORY_TABLE_SQL)
         # 所有交易日
         all_trade_dates = sorted([
             r[0] for r in conn.execute(
                 "SELECT DISTINCT trade_date FROM daily ORDER BY trade_date"
             ).fetchall()
         ])
+
+        if not all_trade_dates:
+            print("⚠ 无 daily 行情数据，无法补充主线排行")
+            return
 
         # 已处理的
         done = set(
@@ -288,7 +296,6 @@ def backfill(target_dates=None):
     # 需要额外前导数据用于计算窗口和回看
     lookback = max(SCORE_WINDOWS) + NEW_HIGH_LOOKBACK + 20  # 约100个交易日
 
-    all_trade_dates_set = set(all_trade_dates)
     # 找到 batch_start 往前 lookback 个交易日
     sorted_dates = sorted(all_trade_dates)
     idx = sorted_dates.index(batch_start)
