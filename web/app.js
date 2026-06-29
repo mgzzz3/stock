@@ -59,6 +59,15 @@ const els = {
   predictionMeta: document.querySelector("#predictionMeta"),
   predictionOnly: document.querySelector("#predictionOnly"),
   showAllStocks: document.querySelector("#showAllStocks"),
+  /* Main line monitoring */
+  mainlinePanel: document.querySelector("#mainlinePanel"),
+  mainlineSubtitle: document.querySelector("#mainlineSubtitle"),
+  mainlineBadge: document.querySelector("#mainlineBadge"),
+  signalCard: document.querySelector("#signalCard"),
+  signalMeta: document.querySelector("#signalMeta"),
+  mainlineMeta: document.querySelector("#mainlineMeta"),
+  mainlineCurrent: document.querySelector("#mainlineCurrent"),
+  mainlineTableBody: document.querySelector("#mainlineTableBody"),
 };
 
 const primaryColumns = [
@@ -1299,6 +1308,170 @@ async function runSearch(query) {
   }
 }
 
+/* ── Main Line Monitoring ── */
+
+function displayMainLineBadge(level) {
+  const badge = els.mainlineBadge;
+  const labels = {
+    strong: "✅ 主线确认",
+    emerging: "🟡 主线萌芽",
+    candidate: "🔵 潜在主线",
+    none: "⚪ 无明显主线",
+  };
+  const cls = {
+    strong: "signal-strong",
+    emerging: "signal-emerging",
+    candidate: "signal-candidate",
+    none: "signal-none",
+  };
+  badge.textContent = labels[level] || "--";
+  badge.className = "mainline-badge";
+  if (cls[level]) badge.classList.add(cls[level]);
+}
+
+function displayScore(score) {
+  if (score >= 0.7) return `<span class="score-high">${score.toFixed(3)}</span>`;
+  if (score >= 0.5) return `<span class="score-mid">${score.toFixed(3)}</span>`;
+  return `<span class="score-low">${score.toFixed(3)}</span>`;
+}
+
+function displayReturn(val, unit = "%") {
+  if (val == null) return "--";
+  const cls = val > 0 ? "return-up" : val < 0 ? "return-down" : "";
+  const sign = val > 0 ? "+" : "";
+  return `<span class="${cls}">${sign}${val.toFixed(2)}${unit}</span>`;
+}
+
+function renderSignalCard(signal) {
+  els.signalCard.innerHTML = "";
+  if (!signal) {
+    els.signalCard.innerHTML = '<div class="signal-loading">暂无信号数据</div>';
+    return;
+  }
+
+  const summary = document.createElement("div");
+  summary.className = `signal-summary ${signal.confirmation_level || "none"}`;
+  summary.textContent = signal.summary || "--";
+  els.signalCard.append(summary);
+
+  els.signalMeta.textContent = `强度 ${signal.strength}/2 · 连续${signal.consecutive_days}天`;
+}
+
+function renderCurrentMainline(sectors, signal) {
+  els.mainlineCurrent.innerHTML = "";
+  if (!sectors || !sectors.length) {
+    els.mainlineCurrent.innerHTML = '<div class="signal-loading">暂无数据</div>';
+    return;
+  }
+
+  const top = sectors[0];
+  const level = signal?.confirmation_level || "none";
+
+  const leader = document.createElement("div");
+  leader.className = `mainline-leader ${level}`;
+
+  const name = document.createElement("div");
+  name.className = "leader-name";
+  name.textContent = top.industry;
+  leader.append(name);
+
+  const score = document.createElement("span");
+  score.className = "leader-score";
+  score.innerHTML = `综合评分 ${displayScore(top.score)}`;
+  leader.append(score);
+
+  if (signal) {
+    const days = document.createElement("span");
+    days.className = "leader-days";
+    days.textContent = `连续登顶 ${signal.consecutive_days} 天`;
+    leader.append(days);
+
+    if (signal.gap != null) {
+      const gap = document.createElement("span");
+      gap.className = "leader-gap";
+      gap.textContent = `领先第二 ${signal.gap.toFixed(3)}`;
+      leader.append(gap);
+    }
+  }
+
+  els.mainlineCurrent.append(leader);
+  els.mainlineMeta.textContent = `评分 ${top.score.toFixed(3)}`;
+}
+
+function renderMainlineTable(sectors) {
+  els.mainlineTableBody.innerHTML = "";
+  if (!sectors || !sectors.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 8;
+    td.textContent = "暂无数据";
+    td.style.textAlign = "center";
+    td.style.color = "var(--muted)";
+    td.style.padding = "20px";
+    tr.append(td);
+    els.mainlineTableBody.append(tr);
+    return;
+  }
+
+  for (const s of sectors) {
+    const tr = document.createElement("tr");
+    if (s.rank === 1) tr.className = "row-top1";
+    else if (s.rank <= 3) tr.className = "row-top2";
+
+    const rankCell = document.createElement("td");
+    const rankBadge = document.createElement("span");
+    rankBadge.className = `rank-num rank-${s.rank <= 3 ? s.rank : "other"}`;
+    rankBadge.textContent = s.rank;
+    rankCell.append(rankBadge);
+
+    const nameCell = document.createElement("td");
+    nameCell.textContent = s.industry;
+    nameCell.style.fontWeight = s.rank === 1 ? "800" : "";
+
+    const scoreCell = document.createElement("td");
+    scoreCell.className = "score-cell";
+    scoreCell.innerHTML = displayScore(s.score);
+
+    const ret5Cell = document.createElement("td");
+    ret5Cell.innerHTML = displayReturn(s.return_5d);
+
+    const amtCell = document.createElement("td");
+    amtCell.textContent = s.turnover_billion != null ? s.turnover_billion.toFixed(1) : "--";
+
+    const breadthCell = document.createElement("td");
+    breadthCell.innerHTML = s.breadth_pct != null ? displayReturn(s.breadth_pct) : "--";
+
+    const nhCell = document.createElement("td");
+    nhCell.innerHTML = s.new_high_pct != null ? displayReturn(s.new_high_pct) : "--";
+
+    const rsCell = document.createElement("td");
+    rsCell.innerHTML = s.relative_strength != null ? displayReturn(s.relative_strength, "pp") : "--";
+
+    tr.append(rankCell, nameCell, scoreCell, ret5Cell, amtCell, breadthCell, nhCell, rsCell);
+    els.mainlineTableBody.append(tr);
+  }
+}
+
+async function loadMainLine() {
+  try {
+    const data = await fetchJson("data/main_line.json");
+    if (!data || !data.sectors) {
+      throw new Error("数据格式异常");
+    }
+    displayMainLineBadge(data.signal?.confirmation_level || data.clarity || "none");
+    els.mainlineSubtitle.textContent = data.date ? `${data.date.slice(0,4)}-${data.date.slice(4,6)}-${data.date.slice(6,8)}` : "--";
+    renderSignalCard(data.signal);
+    renderCurrentMainline(data.sectors, data.signal);
+    renderMainlineTable(data.sectors);
+  } catch (error) {
+    els.mainlineSubtitle.textContent = "加载失败";
+    els.mainlineBadge.textContent = "×";
+    els.mainlineBadge.className = "mainline-badge signal-none";
+    els.signalCard.innerHTML = `<div class="signal-loading">${error.message}</div>`;
+    els.mainlineCurrent.innerHTML = `<div class="signal-loading">${error.message}</div>`;
+  }
+}
+
 async function init() {
   setLoading("加载日期");
   try {
@@ -1315,7 +1488,7 @@ async function init() {
     }
     
     syncDates(payload);
-    await Promise.all([loadDate(payload.latest_date), loadIndustryTrends()]);
+    await Promise.all([loadDate(payload.latest_date), loadIndustryTrends(), loadMainLine()]);
   } catch (error) {
     setError(error);
   }

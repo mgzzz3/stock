@@ -37,3 +37,7 @@ uv run python -m strategy.next_day predict
 echo
 echo "=== 7/7  export static web data ==="
 uv run python export_web_data.py
+
+echo
+echo "=== 8/8  量化主线监控 ==="
+uv run python sector_monitor.py

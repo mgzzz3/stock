@@ -116,6 +116,62 @@
         </div>
       </section>
 
+      <section class="mainline-panel" id="mainlinePanel" aria-label="量化主线监控">
+        <div class="section-head">
+          <div>
+            <h2>🔥 量化主线监控</h2>
+            <p id="mainlineSubtitle">加载中</p>
+          </div>
+          <div class="mainline-badge" id="mainlineBadge">--</div>
+        </div>
+
+        <div class="mainline-grid">
+          <div class="chart-box">
+            <div class="chart-head">
+              <strong>主线确认信号</strong>
+              <span id="signalMeta">--</span>
+            </div>
+            <div class="signal-card" id="signalCard">
+              <div class="signal-loading">加载中…</div>
+            </div>
+          </div>
+
+          <div class="chart-box">
+            <div class="chart-head">
+              <strong>当前主线</strong>
+              <span id="mainlineMeta">--</span>
+            </div>
+            <div class="mainline-current" id="mainlineCurrent">
+              <div class="signal-loading">加载中…</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mainline-table-wrap">
+          <div class="chart-head">
+            <strong>板块评分排行 TOP8</strong>
+            <span>
+              <a href="data/rotation_matrix.html" target="_blank" class="mainline-link">🗺️ 轮动矩阵</a>
+            </span>
+          </div>
+          <table class="mainline-table">
+            <thead>
+              <tr>
+                <th>排名</th>
+                <th>板块</th>
+                <th>综合评分</th>
+                <th>5日涨幅</th>
+                <th>成交额(亿)</th>
+                <th>上涨占比</th>
+                <th>新高占比</th>
+                <th>相对强度</th>
+              </tr>
+            </thead>
+            <tbody id="mainlineTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+
       <section class="list-panel" id="listPanel">
         <div class="table-wrap">
           <table id="stockTable">
