@@ -1475,8 +1475,18 @@ async function loadMainLine(date) {
       }
     }
 
-    if (!data) {
-      data = await fetchJson("data/main_line.json");
+    if (!data && date) {
+      const mainlineIndex = state.manifest?.mainline_index || {};
+      const staticPath = mainlineIndex[date] || `data/mainline/${date}.json`;
+      try {
+        data = await fetchJson(staticPath);
+      } catch {
+        data = null;
+      }
+    }
+
+    if (!data && (!date || date === state.latestDate)) {
+      data = await fetchJson(state.manifest?.mainline || "data/main_line.json");
     }
 
     if (!data || !data.sectors) {
