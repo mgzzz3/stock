@@ -356,8 +356,20 @@ class H5Handler(SimpleHTTPRequestHandler):
                 ).fetchall()
 
             if not rows:
+                with db_connect() as conn:
+                    conn.row_factory = sqlite3.Row
+                    fallback = conn.execute(
+                        """SELECT MAX(trade_date) AS trade_date
+                           FROM sector_ranking_history
+                           WHERE trade_date <= ?""",
+                        (date,),
+                    ).fetchone()
+                fallback_date = fallback["trade_date"] if fallback else None
+                if fallback_date and fallback_date != date:
+                    return self.handle_mainline({"date": [fallback_date], "requested_date": [date]})
                 return {"error": f"No main line data for {date}"}, HTTPStatus.NOT_FOUND
 
+            requested_date = params.get("requested_date", [date])[0]
             sectors = []
             for r in rows:
                 d = dict(r)
@@ -415,6 +427,8 @@ class H5Handler(SimpleHTTPRequestHandler):
 
             return {
                 "date": date,
+                "requested_date": requested_date,
+                "is_fallback_date": requested_date != date,
                 "main_line": sectors[0]["industry"] if sectors else None,
                 "main_score": sectors[0]["score"] if sectors else None,
                 "clarity": (
