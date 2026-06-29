@@ -1459,13 +1459,25 @@ function renderMainlineTable(sectors) {
 
 async function loadMainLine(date) {
   try {
-    const url = date ? `/api/mainline?date=${date}` : "data/main_line.json";
-    const data = await fetchJson(url);
+    // Try API first (works with h5_server.py), fall back to static JSON
+    let data;
+    if (date) {
+      try {
+        data = await fetchJson(`/api/mainline?date=${date}`);
+      } catch {
+        // API unavailable — use static file (shows latest only)
+        data = await fetchJson("data/main_line.json");
+      }
+    } else {
+      data = await fetchJson("data/main_line.json");
+    }
+
     if (!data || !data.sectors) {
       throw new Error("数据格式异常");
     }
     displayMainLineBadge(data.signal?.confirmation_level || data.clarity || "none");
-    els.mainlineSubtitle.textContent = data.date ? `${data.date.slice(0,4)}-${data.date.slice(4,6)}-${data.date.slice(6,8)}` : "--";
+    const dateStr = data.date || "";
+    els.mainlineSubtitle.textContent = dateStr ? `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}` : "--";
     renderSignalCard(data.signal);
     renderCurrentMainline(data.sectors, data.signal);
     renderMainlineTable(data.sectors);
