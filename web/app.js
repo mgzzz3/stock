@@ -1485,16 +1485,29 @@ async function loadMainLine(date) {
       }
     }
 
-    if (!data && (!date || date === state.latestDate)) {
-      data = await fetchJson(state.manifest?.mainline || "data/main_line.json");
+    if (!data) {
+      const latestPath = state.manifest?.mainline || "data/main_line.json";
+      try {
+        data = await fetchJson(latestPath);
+        if (data && date && data.date !== date) {
+          data.requested_date = date;
+          data.is_fallback_date = true;
+        }
+      } catch {
+        data = null;
+      }
     }
 
-    if (!data || !data.sectors) {
+    if (!data || !Array.isArray(data.sectors)) {
       throw new Error("数据格式异常");
     }
     displayMainLineBadge(data.signal?.confirmation_level || data.clarity || "none");
     const dateStr = data.date || "";
-    els.mainlineSubtitle.textContent = dateStr ? `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}` : "--";
+    const requestedDate = data.requested_date || date;
+    const subtitle = dateStr ? `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}` : "--";
+    els.mainlineSubtitle.textContent = data.is_fallback_date && requestedDate
+      ? `${subtitle}（${displayDate(requestedDate)}无主线数据，显示最近可用）`
+      : subtitle;
     renderSignalCard(data.signal);
     renderCurrentMainline(data.sectors, data.signal);
     renderMainlineTable(data.sectors);
