@@ -1459,15 +1459,11 @@ function renderMainlineTable(sectors) {
 
 async function loadMainLine(date) {
   try {
-    // Try API first (works with h5_server.py), fall back to static JSON
     let data;
     if (date) {
-      try {
-        data = await fetchJson(`/api/mainline?date=${date}`);
-      } catch {
-        // API unavailable — use static file (shows latest only)
-        data = await fetchJson("data/main_line.json");
-      }
+      // Try the API (works with h5_server.py). If it fails, show error.
+      const apiUrl = `/api/mainline?date=${date}&_=${Date.now()}`;
+      data = await fetchJson(apiUrl);
     } else {
       data = await fetchJson("data/main_line.json");
     }
