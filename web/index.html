@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A 股信号浏览</title>
-    <link rel="stylesheet" href="styles.css?v=prediction-list-3" />
+    <link rel="stylesheet" href="styles.css?v=tab-layout-1" />
   </head>
   <body>
     <main class="shell">
@@ -16,6 +16,11 @@
             <p id="subtitle">加载中</p>
           </div>
         </div>
+
+        <nav class="view-tabs" id="viewTabs" aria-label="视图切换">
+          <button type="button" class="view-tab active" data-tab="mainline">🔥 主线</button>
+          <button type="button" class="view-tab" data-tab="b1">B1</button>
+        </nav>
 
         <form class="search" id="searchForm">
           <label class="sr-only" for="searchInput">股票名称或代码</label>
@@ -36,183 +41,189 @@
 
       <nav class="date-tabs" id="dateTabs" aria-label="可选日期"></nav>
 
-      <section class="summary" aria-live="polite">
-        <div>
-          <span class="summary-label" id="modeLabel">日期</span>
-          <strong id="summaryTitle">--</strong>
-        </div>
-        <div class="summary-actions">
-          <button class="summary-back" id="industryBack" type="button" hidden>← 返回行业列表</button>
-          <div class="summary-meta" id="summaryMeta">--</div>
-        </div>
-      </section>
+      <!-- ════ 主线 Tab ════ -->
+      <div class="tab-content" id="tabMainline" data-tab="mainline">
+        <section class="mainline-panel" aria-label="量化主线监控">
+          <div class="section-head">
+            <div>
+              <h2>🔥 量化主线监控</h2>
+              <p id="mainlineSubtitle">加载中</p>
+            </div>
+            <div class="mainline-badge" id="mainlineBadge">--</div>
+          </div>
 
-      <div class="prediction-toolbar" id="predictionToolbar" hidden>
-        <div>
-          <strong id="predictionTitle">B1 次日预测</strong>
-          <span id="predictionMeta">--</span>
-        </div>
-        <div class="prediction-filters" aria-label="股票列表范围">
-          <button id="predictionOnly" type="button">仅看预测</button>
-          <button id="showAllStocks" type="button">全部 B1 股票池</button>
-        </div>
+          <div class="mainline-grid">
+            <div class="chart-box">
+              <div class="chart-head">
+                <strong>主线确认信号</strong>
+                <span id="signalMeta">--</span>
+              </div>
+              <div class="signal-card" id="signalCard">
+                <div class="signal-loading">加载中…</div>
+              </div>
+            </div>
+
+            <div class="chart-box">
+              <div class="chart-head">
+                <strong>当前主线</strong>
+                <span id="mainlineMeta">--</span>
+              </div>
+              <div class="mainline-current" id="mainlineCurrent">
+                <div class="signal-loading">加载中…</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="mainline-table-wrap">
+            <div class="chart-head">
+              <strong>板块评分排行 TOP8</strong>
+              <span>
+                <a href="data/rotation_matrix.html" target="_blank" class="mainline-link">🗺️ 轮动矩阵</a>
+              </span>
+            </div>
+            <table class="mainline-table">
+              <thead>
+                <tr>
+                  <th>排名</th>
+                  <th>板块</th>
+                  <th>综合评分</th>
+                  <th>5日涨幅</th>
+                  <th>成交额(亿)</th>
+                  <th>上涨占比</th>
+                  <th>新高占比</th>
+                  <th>相对强度</th>
+                </tr>
+              </thead>
+              <tbody id="mainlineTableBody"></tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
-      <section class="industry-panel" aria-label="行业板块趋势">
-        <div class="section-head">
+      <!-- ════ B1 Tab ════ -->
+      <div class="tab-content" id="tabB1" data-tab="b1" hidden>
+        <section class="b1-summary" aria-live="polite">
           <div>
-            <h2>行业板块</h2>
-            <p id="industrySubtitle">加载中</p>
+            <span class="summary-label" id="modeLabel">日期</span>
+            <strong id="summaryTitle">--</strong>
           </div>
-          <div class="section-stat" id="industryStat">--</div>
-        </div>
-
-        <div class="industry-grid">
-          <div class="chart-box">
-            <div class="chart-head">
-              <strong>多日股票数变化</strong>
-              <span id="industryChartMeta">--</span>
-            </div>
-            <div class="chart-wrap">
-              <svg id="industryChart" viewBox="0 0 720 260" role="img" aria-label="行业股票数多日变化曲线"></svg>
-            </div>
-            <div class="chart-legend" id="industryLegend"></div>
+          <div class="summary-actions">
+            <button class="summary-back" id="industryBack" type="button" hidden>← 返回行业列表</button>
+            <div class="summary-meta" id="summaryMeta">--</div>
           </div>
+        </section>
 
-          <div class="new-industry">
-            <div class="chart-head">
-              <strong>板块变化</strong>
-              <span id="industryChangeMeta">--</span>
-            </div>
-            <div class="industry-change-group">
-              <div class="industry-change-title">
-                <strong>新进板块</strong>
-                <span id="newIndustryMeta">--</span>
-              </div>
-              <div class="new-industry-list" id="newIndustryList"></div>
-            </div>
-            <div class="industry-change-group">
-              <div class="industry-change-title">
-                <strong>消失板块</strong>
-                <span id="removedIndustryMeta">--</span>
-              </div>
-              <div class="new-industry-list" id="removedIndustryList"></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="industry-table-wrap">
-          <table class="industry-table">
-            <thead>
-              <tr>
-                <th>行业</th>
-                <th>股票数</th>
-                <th>较上一日</th>
-                <th>首次出现</th>
-              </tr>
-            </thead>
-            <tbody id="industryTableBody"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="mainline-panel" id="mainlinePanel" aria-label="量化主线监控">
-        <div class="section-head">
+        <div class="prediction-toolbar" id="predictionToolbar" hidden>
           <div>
-            <h2>🔥 量化主线监控</h2>
-            <p id="mainlineSubtitle">加载中</p>
+            <strong id="predictionTitle">B1 次日预测</strong>
+            <span id="predictionMeta">--</span>
           </div>
-          <div class="mainline-badge" id="mainlineBadge">--</div>
-        </div>
-
-        <div class="mainline-grid">
-          <div class="chart-box">
-            <div class="chart-head">
-              <strong>主线确认信号</strong>
-              <span id="signalMeta">--</span>
-            </div>
-            <div class="signal-card" id="signalCard">
-              <div class="signal-loading">加载中…</div>
-            </div>
-          </div>
-
-          <div class="chart-box">
-            <div class="chart-head">
-              <strong>当前主线</strong>
-              <span id="mainlineMeta">--</span>
-            </div>
-            <div class="mainline-current" id="mainlineCurrent">
-              <div class="signal-loading">加载中…</div>
-            </div>
+          <div class="prediction-filters" aria-label="股票列表范围">
+            <button id="predictionOnly" type="button">仅看预测</button>
+            <button id="showAllStocks" type="button">全部 B1 股票池</button>
           </div>
         </div>
 
-        <div class="mainline-table-wrap">
-          <div class="chart-head">
-            <strong>板块评分排行 TOP8</strong>
-            <span>
-              <a href="data/rotation_matrix.html" target="_blank" class="mainline-link">🗺️ 轮动矩阵</a>
-            </span>
-          </div>
-          <table class="mainline-table">
-            <thead>
-              <tr>
-                <th>排名</th>
-                <th>板块</th>
-                <th>综合评分</th>
-                <th>5日涨幅</th>
-                <th>成交额(亿)</th>
-                <th>上涨占比</th>
-                <th>新高占比</th>
-                <th>相对强度</th>
-              </tr>
-            </thead>
-            <tbody id="mainlineTableBody"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="list-panel" id="listPanel">
-        <div class="table-wrap">
-          <table id="stockTable">
-            <thead id="tableHead"></thead>
-            <tbody id="tableBody"></tbody>
-          </table>
-        </div>
-        <div class="mobile-list" id="mobileList"></div>
-        <div class="empty" id="emptyState" hidden>没有匹配的数据</div>
-      </section>
-
-      <section class="detail-panel" id="detailPanel" hidden>
-        <div class="detail-header">
-          <button class="detail-back" id="detailBack" type="button" aria-label="返回列表">← 返回</button>
-          <div class="detail-title">
-            <strong id="detailName">--</strong>
-            <span id="detailCode">--</span>
-          </div>
-          <div class="detail-meta" id="detailMeta"></div>
-        </div>
-        <div class="detail-body">
-          <div class="detail-chart-wrap">
-            <div class="kline-hover-info" id="klineHoverInfo" aria-live="polite">
-              <strong id="klineHoverDate">--</strong>
-              <span>开盘 <b id="klineHoverOpen">--</b></span>
-              <span>收盘 <b id="klineHoverClose">--</b></span>
-              <span>涨幅 <b id="klineHoverChange">--</b></span>
+        <section class="industry-panel" aria-label="行业板块趋势">
+          <div class="section-head">
+            <div>
+              <h2>行业板块</h2>
+              <p id="industrySubtitle">加载中</p>
             </div>
-            <svg id="klineChart" viewBox="0 0 800 400" role="img" aria-label="日线K线图"></svg>
+            <div class="section-stat" id="industryStat">--</div>
           </div>
-          <aside class="detail-return-panel" aria-label="B标记收益">
-            <div class="detail-return-title">B标记收益</div>
-            <div class="detail-return-note">近20个交易日内出现的B，按次日开盘买入计算至最新收盘。</div>
-            <div class="detail-return-list" id="detailReturns"></div>
-          </aside>
-        </div>
-        <div class="detail-loading" id="detailLoading">正在加载日线数据…</div>
-        <div class="detail-error" id="detailError" hidden></div>
-      </section>
+
+          <div class="industry-grid">
+            <div class="chart-box">
+              <div class="chart-head">
+                <strong>多日股票数变化</strong>
+                <span id="industryChartMeta">--</span>
+              </div>
+              <div class="chart-wrap">
+                <svg id="industryChart" viewBox="0 0 720 260" role="img" aria-label="行业股票数多日变化曲线"></svg>
+              </div>
+              <div class="chart-legend" id="industryLegend"></div>
+            </div>
+
+            <div class="new-industry">
+              <div class="chart-head">
+                <strong>板块变化</strong>
+                <span id="industryChangeMeta">--</span>
+              </div>
+              <div class="industry-change-group">
+                <div class="industry-change-title">
+                  <strong>新进板块</strong>
+                  <span id="newIndustryMeta">--</span>
+                </div>
+                <div class="new-industry-list" id="newIndustryList"></div>
+              </div>
+              <div class="industry-change-group">
+                <div class="industry-change-title">
+                  <strong>消失板块</strong>
+                  <span id="removedIndustryMeta">--</span>
+                </div>
+                <div class="new-industry-list" id="removedIndustryList"></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="industry-table-wrap">
+            <table class="industry-table">
+              <thead>
+                <tr>
+                  <th>行业</th>
+                  <th>股票数</th>
+                  <th>较上一日</th>
+                  <th>首次出现</th>
+                </tr>
+              </thead>
+              <tbody id="industryTableBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="list-panel" id="listPanel">
+          <div class="table-wrap">
+            <table id="stockTable">
+              <thead id="tableHead"></thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+          <div class="mobile-list" id="mobileList"></div>
+          <div class="empty" id="emptyState" hidden>没有匹配的数据</div>
+        </section>
+
+        <section class="detail-panel" id="detailPanel" hidden>
+          <div class="detail-header">
+            <button class="detail-back" id="detailBack" type="button" aria-label="返回列表">← 返回</button>
+            <div class="detail-title">
+              <strong id="detailName">--</strong>
+              <span id="detailCode">--</span>
+            </div>
+            <div class="detail-meta" id="detailMeta"></div>
+          </div>
+          <div class="detail-body">
+            <div class="detail-chart-wrap">
+              <div class="kline-hover-info" id="klineHoverInfo" aria-live="polite">
+                <strong id="klineHoverDate">--</strong>
+                <span>开盘 <b id="klineHoverOpen">--</b></span>
+                <span>收盘 <b id="klineHoverClose">--</b></span>
+                <span>涨幅 <b id="klineHoverChange">--</b></span>
+              </div>
+              <svg id="klineChart" viewBox="0 0 800 400" role="img" aria-label="日线K线图"></svg>
+            </div>
+            <aside class="detail-return-panel" aria-label="B标记收益">
+              <div class="detail-return-title">B标记收益</div>
+              <div class="detail-return-note">近20个交易日内出现的B，按次日开盘买入计算至最新收盘。</div>
+              <div class="detail-return-list" id="detailReturns"></div>
+            </aside>
+          </div>
+          <div class="detail-loading" id="detailLoading">正在加载日线数据…</div>
+          <div class="detail-error" id="detailError" hidden></div>
+        </section>
+      </div>
     </main>
 
-    <script src="app.js?v=prediction-list-4" defer></script>
+    <script src="app.js?v=tab-layout-1" defer></script>
   </body>
 </html>

@@ -12,6 +12,7 @@ const state = {
   dateRows: [],
   selectedIndustry: null,
   listFilter: "all",
+  activeTab: "mainline",  // "mainline" | "b1"
 };
 
 const els = {
@@ -68,6 +69,10 @@ const els = {
   mainlineMeta: document.querySelector("#mainlineMeta"),
   mainlineCurrent: document.querySelector("#mainlineCurrent"),
   mainlineTableBody: document.querySelector("#mainlineTableBody"),
+  /* Tabs */
+  viewTabs: document.querySelector("#viewTabs"),
+  tabMainline: document.querySelector("#tabMainline"),
+  tabB1: document.querySelector("#tabB1"),
 };
 
 const primaryColumns = [
@@ -1452,9 +1457,10 @@ function renderMainlineTable(sectors) {
   }
 }
 
-async function loadMainLine() {
+async function loadMainLine(date) {
   try {
-    const data = await fetchJson("data/main_line.json");
+    const url = date ? `/api/mainline?date=${date}` : "data/main_line.json";
+    const data = await fetchJson(url);
     if (!data || !data.sectors) {
       throw new Error("数据格式异常");
     }
@@ -1472,27 +1478,85 @@ async function loadMainLine() {
   }
 }
 
+/* ── Tab Switching ── */
+
+function switchTab(tabName) {
+  state.activeTab = tabName;
+
+  // Update tab buttons
+  document.querySelectorAll(".view-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === tabName);
+  });
+
+  // Show/hide tab content
+  els.tabMainline.hidden = tabName !== "mainline";
+  els.tabB1.hidden = tabName !== "b1";
+
+  // Update subtitle
+  if (tabName === "mainline") {
+    els.subtitle.textContent = `主线监控 · ${displayDate(state.selectedDate)}`;
+  } else {
+    els.subtitle.textContent = `B1 信号 · ${displayDate(state.selectedDate)}`;
+  }
+
+  // Reload content for current date
+  if (tabName === "mainline") {
+    loadMainLine(state.selectedDate);
+  } else {
+    loadDate(state.selectedDate);
+  }
+}
+
+/* ── Date selection — tab-aware ── */
+
+async function onDateSelect(date) {
+  state.selectedDate = date;
+  state.mode = "date";
+  els.searchInput.value = "";
+  renderDateTabs();
+
+  if (state.activeTab === "mainline") {
+    els.subtitle.textContent = `主线监控 · ${displayDate(date)}`;
+    loadMainLine(date);
+  } else {
+    loadDate(date);
+  }
+}
+
 async function init() {
-  setLoading("加载日期");
+  state.activeTab = "mainline";
+  els.subtitle.textContent = "加载日期";
   try {
     const payload = await fetchJson("data/manifest.json");
     state.manifest = payload;
     
     if (!payload.latest_date || !payload.dates || payload.dates.length === 0) {
       els.subtitle.textContent = "请先生成数据，在项目根目录运行：python export_web_data.py";
-      els.summaryTitle.textContent = "暂无数据";
-      els.summaryMeta.textContent = "运行 export_web_data.py 生成数据后再刷新页面";
       els.emptyState.hidden = false;
       els.emptyState.textContent = "尚未生成数据文件，请运行数据导出命令";
       return;
     }
     
     syncDates(payload);
-    await Promise.all([loadDate(payload.latest_date), loadIndustryTrends(), loadMainLine()]);
+    state.selectedDate = payload.latest_date;
+
+    // Switch to default tab (mainline)
+    switchTab("mainline");
+
+    // Also preload B1 data in background
+    Promise.all([
+      loadDate(payload.latest_date),
+      loadIndustryTrends(),
+    ]).catch(() => {});
   } catch (error) {
-    setError(error);
+    els.subtitle.textContent = "初始化失败";
   }
 }
+
+// Tab click handlers
+document.querySelectorAll(".view-tab").forEach((btn) => {
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
 
 els.predictionOnly.addEventListener("click", () => applyListFilter("predictions"));
 els.showAllStocks.addEventListener("click", () => applyListFilter("all"));
@@ -1501,17 +1565,42 @@ els.searchForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const query = els.searchInput.value.trim();
   if (query) {
+    // Switch to B1 tab for search results
+    if (state.activeTab !== "b1") switchTab("b1");
     runSearch(query);
   } else if (state.selectedDate) {
-    loadDate(state.selectedDate);
+    onDateSelect(state.selectedDate);
   }
 });
 
 els.clearSearch.addEventListener("click", () => {
   els.searchInput.value = "";
   if (state.selectedDate) {
-    loadDate(state.selectedDate);
+    onDateSelect(state.selectedDate);
   }
 });
+
+// Override date tab clicks — each date button already has a click handler
+// in renderDateTabs that calls loadDate(). We'll patch renderDateTabs.
+const _origRenderDateTabs = renderDateTabs;
+renderDateTabs = function() {
+  els.dateTabs.innerHTML = "";
+  if (!state.dates.length) {
+    const empty = document.createElement("span");
+    empty.className = "summary-meta";
+    empty.textContent = "暂无日期";
+    els.dateTabs.append(empty);
+    return;
+  }
+  for (const item of state.dates) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = displayDate(item.date);
+    button.className = item.date === state.selectedDate ? "active" : "";
+    button.title = (item.files || []).join("\n");
+    button.addEventListener("click", () => onDateSelect(item.date));
+    els.dateTabs.append(button);
+  }
+};
 
 init();

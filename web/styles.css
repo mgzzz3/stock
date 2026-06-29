@@ -39,10 +39,88 @@ input {
   padding: 20px 0 36px;
 }
 
+/* ── View Tabs (主线 / B1) ── */
+
+.view-tabs {
+  display: flex;
+  gap: 4px;
+  background: #f1f3f5;
+  border-radius: 10px;
+  padding: 3px;
+  justify-self: center;
+}
+
+.view-tab {
+  height: 36px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #495057;
+  padding: 0 16px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+}
+
+.view-tab:hover {
+  color: var(--accent-strong);
+}
+
+.view-tab.active {
+  background: #fff;
+  color: var(--accent-strong);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.tab-content[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 760px) {
+  .view-tabs {
+    justify-self: stretch;
+  }
+  .view-tab {
+    flex: 1;
+    text-align: center;
+    padding: 0 8px;
+    font-size: 13px;
+  }
+}
+
+.b1-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.b1-summary strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+@media (max-width: 760px) {
+  .b1-summary {
+    display: block;
+  }
+  .b1-summary .summary-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+}
+
 .toolbar {
   display: grid;
-  grid-template-columns: 1fr minmax(320px, 460px);
-  gap: 18px;
+  grid-template-columns: auto 1fr minmax(280px, 400px);
+  gap: 14px;
   align-items: center;
   padding: 18px;
   background: var(--panel);
@@ -1209,12 +1287,16 @@ td[data-col="bull_bear"] {
 
   .toolbar {
     grid-template-columns: 1fr;
-    gap: 14px;
+    gap: 12px;
     padding: 14px;
   }
 
   h1 {
     font-size: 19px;
+  }
+
+  .view-tabs {
+    order: 0;
   }
 
   .search {

@@ -191,6 +191,10 @@ class H5Handler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             self.send_json(self.handle_kline(params))
             return
+        if parsed.path == "/api/mainline":
+            params = parse_qs(parsed.query)
+            self.send_json(self.handle_mainline(params))
+            return
         if parsed.path == "/":
             self.path = "/index.html"
         super().do_GET()
@@ -321,8 +325,117 @@ class H5Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def handle_mainline(self, params: dict[str, list[str]]) -> dict:
+        """Query main line ranking for a given date from sector_ranking_history."""
+        date = params.get("date", [None])[0]
+        if not date:
+            with db_connect() as conn:
+                row = conn.execute(
+                    "SELECT MAX(trade_date) FROM sector_ranking_history"
+                ).fetchone()
+                date = row[0] if row and row[0] else None
+            if not date:
+                return {"error": "No main line data available"}, HTTPStatus.NOT_FOUND
+
+        try:
+            with db_connect() as conn:
+                conn.row_factory = sqlite3.Row
+                rows = conn.execute(
+                    """SELECT trade_date, industry, score, rank,
+                              return_5d, return_10d, return_20d,
+                              turnover, breadth, new_high_ratio,
+                              concentration, relative_strength
+                       FROM sector_ranking_history
+                       WHERE trade_date = ?
+                       ORDER BY rank
+                       LIMIT 10""",
+                    (date,),
+                ).fetchall()
+
+            if not rows:
+                return {"error": f"No main line data for {date}"}, HTTPStatus.NOT_FOUND
+
+            sectors = []
+            for r in rows:
+                d = dict(r)
+                sectors.append({
+                    "rank": int(d["rank"]),
+                    "industry": d["industry"],
+                    "score": round(float(d["score"]), 4) if d["score"] else None,
+                    "return_5d": round(float(d["return_5d"]), 2) if d["return_5d"] else None,
+                    "turnover_billion": round(float(d["turnover"]), 1) if d["turnover"] else None,
+                    "breadth_pct": round(float(d["breadth"]), 1) if d["breadth"] else None,
+                    "new_high_pct": round(float(d["new_high_ratio"]), 1) if d["new_high_ratio"] else None,
+                    "relative_strength": round(float(d["relative_strength"]), 2) if d["relative_strength"] else None,
+                })
+
+            signal = None
+            if sectors:
+                top_score = sectors[0]["score"] if sectors[0]["score"] else 0
+                second_score = sectors[1]["score"] if len(sectors) > 1 and sectors[1]["score"] else 0
+                gap = round(top_score - second_score, 4)
+                consecutive = 1
+                with db_connect() as conn:
+                    prev_dates = conn.execute(
+                        """SELECT DISTINCT trade_date FROM sector_ranking_history
+                           WHERE trade_date < ? ORDER BY trade_date DESC LIMIT 10""",
+                        (date,),
+                    ).fetchall()
+                    for prev_row in prev_dates:
+                        pd = prev_row["trade_date"]
+                        pt = conn.execute(
+                            "SELECT industry FROM sector_ranking_history WHERE trade_date = ? ORDER BY rank LIMIT 1",
+                            (pd,),
+                        ).fetchone()
+                        if pt and pt["industry"] == sectors[0]["industry"]:
+                            consecutive += 1
+                        else:
+                            break
+
+                if top_score >= 0.70 and gap >= 0.10:
+                    level = "strong" if consecutive >= 3 else "emerging"
+                elif top_score >= 0.70:
+                    level = "candidate"
+                else:
+                    level = "none"
+
+                signal = {
+                    "main_line": sectors[0]["industry"],
+                    "main_score": top_score,
+                    "gap": gap,
+                    "consecutive_days": consecutive,
+                    "confirmation_level": level,
+                    "strength": 2 if level == "strong" else 1 if level in ("emerging", "candidate") else 0,
+                    "summary": _mainline_summary(level, sectors[0]["industry"], top_score, consecutive, gap),
+                }
+
+            return {
+                "date": date,
+                "main_line": sectors[0]["industry"] if sectors else None,
+                "main_score": sectors[0]["score"] if sectors else None,
+                "clarity": (
+                    "clear" if signal and signal["confirmation_level"] in ("strong", "emerging")
+                    else "fuzzy" if signal else "rotating"
+                ),
+                "signal": signal,
+                "sectors": sectors,
+            }, HTTPStatus.OK
+
+        except Exception as e:
+            return {"error": str(e)}, HTTPStatus.INTERNAL_SERVER_ERROR
+
     def log_message(self, format: str, *args) -> None:
         print(f"{self.address_string()} - {format % args}")
+
+
+def _mainline_summary(level, main_line, score, consecutive, gap):
+    if level == "strong":
+        return f"✅ 主线确认！{main_line}连续{consecutive}天评分≥0.70，领先{round(gap,2)}，当前评分{round(score,3)}"
+    if level == "emerging":
+        return f"🟡 主线萌芽：{main_line}评分{round(score,3)}，领先{round(gap,2)}，连续{consecutive}天不足3天"
+    if level == "candidate":
+        return f"🔵 潜在主线：{main_line}评分{round(score,3)}，领先{round(gap,2)}，需观察持续性"
+    return f"⚪ 市场无明显主线"
 
 
 def main() -> int:
