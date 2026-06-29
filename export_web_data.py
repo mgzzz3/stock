@@ -285,6 +285,122 @@ def resolve_code_map(code_values: set[str], db_path: Path) -> dict[str, str]:
     return mapping
 
 
+
+
+def mainline_summary(level: str, main_line: str, score: float, consecutive: int, gap: float) -> str:
+    if level == "strong":
+        return f"✅ 主线确认！{main_line}连续{consecutive}天评分≥0.70，领先{round(gap,2)}，当前评分{round(score,3)}"
+    if level == "emerging":
+        return f"🟡 主线萌芽：{main_line}评分{round(score,3)}，领先{round(gap,2)}，连续{consecutive}天不足3天"
+    if level == "candidate":
+        return f"🔵 潜在主线：{main_line}评分{round(score,3)}，领先{round(gap,2)}，需观察持续性"
+    return "⚪ 暂无明显主线，市场处于轮动状态"
+
+
+def build_mainline_payload(conn: sqlite3.Connection, date: str) -> dict[str, object] | None:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """SELECT trade_date, industry, score, rank,
+                  return_5d, return_10d, return_20d,
+                  turnover, breadth, new_high_ratio,
+                  concentration, relative_strength
+           FROM sector_ranking_history
+           WHERE trade_date = ?
+           ORDER BY rank
+           LIMIT 10""",
+        (date,),
+    ).fetchall()
+    if not rows:
+        return None
+
+    sectors = []
+    for row in rows:
+        sectors.append(
+            {
+                "rank": int(row["rank"]),
+                "industry": row["industry"],
+                "score": round(float(row["score"]), 4) if row["score"] is not None else None,
+                "return_5d": round(float(row["return_5d"]), 2) if row["return_5d"] is not None else None,
+                "turnover_billion": round(float(row["turnover"]), 1) if row["turnover"] is not None else None,
+                "breadth_pct": round(float(row["breadth"]), 1) if row["breadth"] is not None else None,
+                "new_high_pct": round(float(row["new_high_ratio"]), 1) if row["new_high_ratio"] is not None else None,
+                "relative_strength": round(float(row["relative_strength"]), 2) if row["relative_strength"] is not None else None,
+            }
+        )
+
+    signal = None
+    if sectors:
+        top_score = sectors[0]["score"] or 0
+        second_score = sectors[1]["score"] if len(sectors) > 1 and sectors[1]["score"] is not None else 0
+        gap = round(top_score - second_score, 4)
+        consecutive = 1
+        prev_dates = conn.execute(
+            """SELECT DISTINCT trade_date FROM sector_ranking_history
+               WHERE trade_date < ? ORDER BY trade_date DESC LIMIT 10""",
+            (date,),
+        ).fetchall()
+        for prev_row in prev_dates:
+            previous_top = conn.execute(
+                "SELECT industry FROM sector_ranking_history WHERE trade_date = ? ORDER BY rank LIMIT 1",
+                (prev_row["trade_date"],),
+            ).fetchone()
+            if previous_top and previous_top["industry"] == sectors[0]["industry"]:
+                consecutive += 1
+            else:
+                break
+
+        if top_score >= 0.70 and gap >= 0.10:
+            level = "strong" if consecutive >= 3 else "emerging"
+        elif top_score >= 0.70:
+            level = "candidate"
+        else:
+            level = "none"
+        signal = {
+            "main_line": sectors[0]["industry"],
+            "main_score": top_score,
+            "gap": gap,
+            "consecutive_days": consecutive,
+            "confirmation_level": level,
+            "strength": 2 if level == "strong" else 1 if level in ("emerging", "candidate") else 0,
+            "summary": mainline_summary(level, sectors[0]["industry"], top_score, consecutive, gap),
+        }
+
+    return {
+        "date": date,
+        "main_line": sectors[0]["industry"] if sectors else None,
+        "main_score": sectors[0]["score"] if sectors else None,
+        "clarity": "clear" if signal and signal["confirmation_level"] in ("strong", "emerging") else "fuzzy" if signal else "rotating",
+        "signal": signal,
+        "sectors": sectors,
+    }
+
+
+def export_mainline_data(db_path: Path, output_dir: Path, dates: list[str]) -> dict[str, str]:
+    if not db_path.exists() or not dates:
+        return {}
+    try:
+        with sqlite3.connect(db_path) as conn:
+            exists = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='sector_ranking_history'"
+            ).fetchone()
+            if not exists:
+                return {}
+            index = {}
+            for date in dates:
+                payload = build_mainline_payload(conn, date)
+                if not payload:
+                    continue
+                path = output_dir / "mainline" / f"{date}.json"
+                write_json(path, payload)
+                index[date] = f"data/mainline/{date}.json"
+            if dates and dates[-1] in index:
+                latest_payload = build_mainline_payload(conn, dates[-1])
+                if latest_payload:
+                    write_json(output_dir / "main_line.json", latest_payload)
+            return index
+    except sqlite3.Error:
+        return {}
+
 def build_signal_dates(search_df: pd.DataFrame, db_path: Path) -> dict[str, list[str]]:
     """Collect every exported screening date for each stock code."""
     if search_df.empty or "signal_date" not in search_df.columns:
@@ -560,6 +676,7 @@ def export_static_data(
         output_dir / "industry_trends.json",
         build_industry_trends(daily_industry_counts, generated_at),
     )
+    mainline_index = export_mainline_data(db_path, output_dir, sorted(grouped))
 
     manifest = {
         "generated_at": generated_at,
@@ -567,6 +684,8 @@ def export_static_data(
         "dates": date_entries,
         "search_index": "data/search_index.json",
         "industry_trends": "data/industry_trends.json",
+        "mainline": "data/main_line.json" if mainline_index else None,
+        "mainline_index": mainline_index,
         "kline_limit": kline_limit,
         "kline_count": len({path for key, path in kline_index.items() if "." in key}),
         "kline_index": kline_index,

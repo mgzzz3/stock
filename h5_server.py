@@ -379,6 +379,7 @@ class H5Handler(SimpleHTTPRequestHandler):
                 gap = round(top_score - second_score, 4)
                 consecutive = 1
                 with db_connect() as conn:
+                    conn.row_factory = sqlite3.Row
                     prev_dates = conn.execute(
                         """SELECT DISTINCT trade_date FROM sector_ranking_history
                            WHERE trade_date < ? ORDER BY trade_date DESC LIMIT 10""",
