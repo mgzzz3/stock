@@ -1463,3 +1463,31 @@ td[data-col="reasons"] {
     flex: 1;
   }
 }
+
+.mainline-table tbody tr {
+  cursor: pointer;
+}
+
+.mainline-table tbody tr:hover {
+  background: var(--accent-soft);
+}
+
+.mainline-industry-button {
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mainline-industry-button:hover {
+  color: var(--accent-strong);
+  text-decoration: underline;
+}
