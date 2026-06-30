@@ -382,6 +382,7 @@ class H5Handler(SimpleHTTPRequestHandler):
                     "breadth_pct": round(float(d["breadth"]), 1) if d["breadth"] else None,
                     "new_high_pct": round(float(d["new_high_ratio"]), 1) if d["new_high_ratio"] else None,
                     "relative_strength": round(float(d["relative_strength"]), 2) if d["relative_strength"] else None,
+                    "stocks": _mainline_stock_rows(conn, date, d["industry"]),
                 })
 
             signal = None
@@ -445,6 +446,31 @@ class H5Handler(SimpleHTTPRequestHandler):
     def log_message(self, format: str, *args) -> None:
         print(f"{self.address_string()} - {format % args}")
 
+
+
+def _mainline_stock_rows(conn: sqlite3.Connection, date: str, industry: str) -> list[dict[str, object]]:
+    rows = conn.execute(
+        """SELECT d.ts_code, s.name, s.industry, d.close, d.pct_chg, d.amount
+           FROM daily d
+           JOIN stock_basic s ON s.ts_code = d.ts_code
+           WHERE d.trade_date = ?
+             AND s.industry = ?
+             AND COALESCE(s.delist_date, '') = ''
+           ORDER BY d.amount DESC, d.ts_code""",
+        (date, industry),
+    ).fetchall()
+    return [
+        {
+            "trade_date": date,
+            "ts_code": row["ts_code"],
+            "name": row["name"],
+            "industry": row["industry"],
+            "close": round(float(row["close"]), 2) if row["close"] is not None else None,
+            "pct_chg": round(float(row["pct_chg"]), 2) if row["pct_chg"] is not None else None,
+            "amount": round(float(row["amount"]), 2) if row["amount"] is not None else None,
+        }
+        for row in rows
+    ]
 
 def _mainline_summary(level, main_line, score, consecutive, gap):
     if level == "strong":

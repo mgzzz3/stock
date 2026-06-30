@@ -297,6 +297,33 @@ def mainline_summary(level: str, main_line: str, score: float, consecutive: int,
     return "⚪ 暂无明显主线，市场处于轮动状态"
 
 
+
+def build_mainline_stock_rows(conn: sqlite3.Connection, date: str, industry: str) -> list[dict[str, object]]:
+    """Return the full stock pool for a main-line industry on one trading date."""
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """SELECT d.ts_code, s.name, s.industry, d.close, d.pct_chg, d.amount
+           FROM daily d
+           JOIN stock_basic s ON s.ts_code = d.ts_code
+           WHERE d.trade_date = ?
+             AND s.industry = ?
+             AND COALESCE(s.delist_date, '') = ''
+           ORDER BY d.amount DESC, d.ts_code""",
+        (date, industry),
+    ).fetchall()
+    return [
+        {
+            "trade_date": date,
+            "ts_code": row["ts_code"],
+            "name": row["name"],
+            "industry": row["industry"],
+            "close": round(float(row["close"]), 2) if row["close"] is not None else None,
+            "pct_chg": round(float(row["pct_chg"]), 2) if row["pct_chg"] is not None else None,
+            "amount": round(float(row["amount"]), 2) if row["amount"] is not None else None,
+        }
+        for row in rows
+    ]
+
 def build_mainline_payload(conn: sqlite3.Connection, date: str) -> dict[str, object] | None:
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
@@ -325,6 +352,7 @@ def build_mainline_payload(conn: sqlite3.Connection, date: str) -> dict[str, obj
                 "breadth_pct": round(float(row["breadth"]), 1) if row["breadth"] is not None else None,
                 "new_high_pct": round(float(row["new_high_ratio"]), 1) if row["new_high_ratio"] is not None else None,
                 "relative_strength": round(float(row["relative_strength"]), 2) if row["relative_strength"] is not None else None,
+                "stocks": build_mainline_stock_rows(conn, date, row["industry"]),
             }
         )
 
