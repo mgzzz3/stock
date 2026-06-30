@@ -14,6 +14,7 @@ const state = {
   selectedIndustry: null,
   listFilter: "all",
   activeTab: "mainline",  // "mainline" | "b1"
+  mainlineData: null,
 };
 
 const els = {
@@ -162,6 +163,8 @@ const labelMap = {
   next_trade_date: "预测交易日",
   prediction_source_file: "预测来源",
   close: "收盘",
+  pct_chg: "涨跌幅",
+  amount: "成交额",
   vol_ratio: "量比",
   j: "KDJ J",
   ma60: "MA60",
@@ -1421,17 +1424,38 @@ function renderCurrentMainline(sectors, signal) {
   els.mainlineMeta.textContent = `评分 ${top.score.toFixed(3)}`;
 }
 
+function showMainlineIndustryStocks(industry, date = state.selectedDate) {
+  const targetIndustry = normalizeIndustry(industry);
+  const sector = (state.mainlineData?.sectors || []).find((item) => normalizeIndustry(item.industry) === targetIndustry);
+  const rows = Array.isArray(sector?.stocks) ? sector.stocks : [];
+  const columns = ["trade_date", "ts_code", "name", "industry", "close", "pct_chg", "amount"];
+
+  state.mode = "industry";
+  state.selectedIndustry = targetIndustry;
+  state.columns = columns;
+  state.rows = rows;
+  els.searchInput.value = "";
+  els.industryBack.hidden = false;
+  els.industryPanel.hidden = true;
+  els.predictionToolbar.hidden = true;
+  els.detailPanel.hidden = true;
+  els.listPanel.hidden = false;
+  els.modeLabel.textContent = "主线行业";
+  els.summaryTitle.textContent = targetIndustry;
+  els.summaryMeta.textContent = `${displayDate(date)} · ${rows.length} 只股票 · 按成交额排序`;
+  els.subtitle.textContent = `主线行业 · ${displayDate(date)} · ${targetIndustry}`;
+  els.emptyState.hidden = rows.length > 0;
+  els.emptyState.textContent = `${displayDate(date)} 没有行业为 ${targetIndustry} 的主线股票数据`;
+  renderDateTabs();
+  renderTable(columns, rows);
+  renderMobile(columns, rows);
+}
+
 async function openMainlineIndustryStocks(industry) {
-  const date = state.selectedDate || state.latestDate;
-  try {
-    await ensureDateData(date);
-    switchTab("b1", { skipReload: true });
-    showIndustryStocks(industry, date);
-    els.summaryTitle.scrollIntoView({ behavior: "smooth", block: "start" });
-  } catch (error) {
-    switchTab("b1", { skipReload: true });
-    setError(error);
-  }
+  const date = state.mainlineData?.date || state.selectedDate || state.latestDate;
+  switchTab("b1", { skipReload: true });
+  showMainlineIndustryStocks(industry, date);
+  els.summaryTitle.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderMainlineTable(sectors) {
@@ -1546,6 +1570,7 @@ async function loadMainLine(date) {
     els.mainlineSubtitle.textContent = data.is_fallback_date && requestedDate
       ? `${subtitle}（${displayDate(requestedDate)}无主线数据，显示最近可用）`
       : subtitle;
+    state.mainlineData = data;
     renderSignalCard(data.signal);
     renderCurrentMainline(data.sectors, data.signal);
     renderMainlineTable(data.sectors);
