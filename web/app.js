@@ -10,6 +10,7 @@ const state = {
   rows: [],
   dateColumns: [],
   dateRows: [],
+  dateDataDate: null,
   selectedIndustry: null,
   listFilter: "all",
   activeTab: "mainline",  // "mainline" | "b1"
@@ -1216,6 +1217,7 @@ function renderData(payload) {
   if (state.mode === "date") {
     state.dateColumns = state.columns;
     state.dateRows = payloadRows;
+    state.dateDataDate = payload.date || state.selectedDate;
     state.listFilter = predictionRows(payloadRows).length ? "predictions" : "all";
     state.rows = state.listFilter === "predictions" ? predictionRows(payloadRows) : payloadRows;
   } else {
@@ -1279,6 +1281,22 @@ async function loadDate(date) {
   } catch (error) {
     setError(error);
   }
+}
+
+async function ensureDateData(date) {
+  if (state.dateDataDate === date && state.dateRows.length) return;
+  const entry = state.dates.find((item) => item.date === date);
+  if (!entry) throw new Error(`日期 ${displayDate(date)} 暂无数据`);
+  const payload = await fetchJson(entry.file || `data/dates/${date}.json`);
+  if (isEmptyData(payload)) {
+    state.dateColumns = [];
+    state.dateRows = [];
+    state.dateDataDate = date;
+    return;
+  }
+  state.dateColumns = orderedColumns(payload.columns || []);
+  state.dateRows = payload.rows || [];
+  state.dateDataDate = payload.date || date;
 }
 
 async function loadSearchIndex() {
@@ -1403,6 +1421,19 @@ function renderCurrentMainline(sectors, signal) {
   els.mainlineMeta.textContent = `评分 ${top.score.toFixed(3)}`;
 }
 
+async function openMainlineIndustryStocks(industry) {
+  const date = state.selectedDate || state.latestDate;
+  try {
+    await ensureDateData(date);
+    switchTab("b1", { skipReload: true });
+    showIndustryStocks(industry, date);
+    els.summaryTitle.scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (error) {
+    switchTab("b1", { skipReload: true });
+    setError(error);
+  }
+}
+
 function renderMainlineTable(sectors) {
   els.mainlineTableBody.innerHTML = "";
   if (!sectors || !sectors.length) {
@@ -1422,6 +1453,8 @@ function renderMainlineTable(sectors) {
     const tr = document.createElement("tr");
     if (s.rank === 1) tr.className = "row-top1";
     else if (s.rank <= 3) tr.className = "row-top2";
+    tr.title = `查看 ${displayDate(state.selectedDate)} ${s.industry} 股票列表`;
+    tr.addEventListener("click", () => openMainlineIndustryStocks(s.industry));
 
     const rankCell = document.createElement("td");
     const rankBadge = document.createElement("span");
@@ -1430,7 +1463,12 @@ function renderMainlineTable(sectors) {
     rankCell.append(rankBadge);
 
     const nameCell = document.createElement("td");
-    nameCell.textContent = s.industry;
+    const nameButton = document.createElement("button");
+    nameButton.type = "button";
+    nameButton.className = "mainline-industry-button";
+    nameButton.textContent = s.industry;
+    nameButton.title = `查看 ${s.industry} 股票列表`;
+    nameCell.append(nameButton);
     nameCell.style.fontWeight = s.rank === 1 ? "800" : "";
 
     const scoreCell = document.createElement("td");
@@ -1522,7 +1560,7 @@ async function loadMainLine(date) {
 
 /* ── Tab Switching ── */
 
-function switchTab(tabName) {
+function switchTab(tabName, options = {}) {
   state.activeTab = tabName;
 
   // Update tab buttons
@@ -1542,9 +1580,11 @@ function switchTab(tabName) {
   }
 
   // Reload content for current date
+  if (options.skipReload) return;
+
   if (tabName === "mainline") {
     loadMainLine(state.selectedDate);
-  } else {
+  } else if (state.dateDataDate !== state.selectedDate) {
     loadDate(state.selectedDate);
   }
 }
