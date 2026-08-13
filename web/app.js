@@ -14,6 +14,7 @@ const state = {
   selectedIndustry: null,
   listFilter: "all",
   activeTab: "mainline",  // "mainline" | "b1"
+  stockListSource: "b1",  // "b1" | "mainline"
   mainlineData: null,
 };
 
@@ -74,8 +75,14 @@ const els = {
   /* Tabs */
   viewTabs: document.querySelector("#viewTabs"),
   tabMainline: document.querySelector("#tabMainline"),
-  tabB1: document.querySelector("#tabB1"),
+  stockWorkspace: document.querySelector("#stockWorkspace"),
 };
+
+function syncTabPanels() {
+  const showMainlineStockList = state.activeTab === "mainline" && state.stockListSource === "mainline";
+  els.tabMainline.hidden = state.activeTab !== "mainline" || showMainlineStockList;
+  els.stockWorkspace.hidden = state.activeTab !== "b1" && !showMainlineStockList;
+}
 
 const primaryColumns = [
   "signal_date",
@@ -205,7 +212,7 @@ async function fetchJson(url) {
 }
 
 function setLoading(text) {
-  els.industryPanel.hidden = state.mode === "search";
+  els.industryPanel.hidden = state.stockListSource !== "b1" || state.mode === "search";
   els.summaryTitle.textContent = text;
   els.summaryMeta.textContent = "加载中";
   els.tableHead.innerHTML = "";
@@ -215,6 +222,7 @@ function setLoading(text) {
 }
 
 function setError(error) {
+  state.stockListSource = "b1";
   els.summaryTitle.textContent = "读取失败";
   els.summaryMeta.textContent = error.message || String(error);
   els.tableHead.innerHTML = "";
@@ -616,6 +624,7 @@ function showIndustryStocks(industry, date = state.selectedDate) {
   const columns = state.dateColumns.length ? state.dateColumns : state.columns;
   const rows = (state.dateRows.length ? state.dateRows : state.rows).filter((row) => rowIndustry(row) === targetIndustry);
 
+  state.stockListSource = "b1";
   state.mode = "industry";
   state.selectedIndustry = targetIndustry;
   state.columns = columns;
@@ -638,6 +647,22 @@ function showIndustryStocks(industry, date = state.selectedDate) {
 }
 
 function backToIndustryList() {
+  if (state.stockListSource === "mainline") {
+    state.mode = "date";
+    state.selectedIndustry = null;
+    state.stockListSource = "b1";
+    els.searchInput.value = "";
+    els.industryBack.hidden = true;
+    els.listPanel.hidden = true;
+    els.detailPanel.hidden = true;
+    els.industryPanel.hidden = true;
+    els.predictionToolbar.hidden = true;
+    syncTabPanels();
+    els.subtitle.textContent = `主线监控 · ${displayDate(state.selectedDate)}`;
+    els.mainlinePanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
   if (state.selectedDate) {
     loadDate(state.selectedDate);
   }
@@ -700,11 +725,23 @@ async function loadStockDetailData(tsCode) {
 
 function showListView() {
   els.detailPanel.hidden = true;
-  els.listPanel.hidden = false;
-  els.industryPanel.hidden = state.mode === "search" || state.mode === "industry";
+  els.listPanel.hidden = state.activeTab !== state.stockListSource;
+  els.industryPanel.hidden = state.activeTab !== "b1" || state.mode === "search" || state.mode === "industry";
+}
+
+function renderCachedDateData() {
+  renderData({
+    mode: "date",
+    date: state.selectedDate,
+    dates: state.dates,
+    latest_date: state.latestDate,
+    columns: state.dateColumns,
+    rows: state.dateRows,
+  });
 }
 
 function showStockDetail(tsCode, name) {
+  syncTabPanels();
   els.listPanel.hidden = true;
   els.industryPanel.hidden = true;
   els.predictionToolbar.hidden = true;
@@ -1210,6 +1247,7 @@ function applyListFilter(filter) {
 
 function renderData(payload) {
   syncDates(payload);
+  state.stockListSource = "b1";
   state.mode = payload.mode || state.mode;
   state.selectedIndustry = null;
   els.industryBack.hidden = true;
@@ -1254,6 +1292,7 @@ function renderData(payload) {
 }
 
 async function loadDate(date) {
+  state.stockListSource = "b1";
   state.mode = "date";
   state.selectedDate = date;
   els.searchInput.value = "";
@@ -1311,6 +1350,7 @@ async function loadSearchIndex() {
 }
 
 async function runSearch(query) {
+  state.stockListSource = "b1";
   state.mode = "search";
   renderDateTabs();
   setLoading(query);
@@ -1430,12 +1470,14 @@ function showMainlineIndustryStocks(industry, date = state.selectedDate) {
   const rows = Array.isArray(sector?.stocks) ? sector.stocks : [];
   const columns = ["trade_date", "ts_code", "name", "industry", "close", "pct_chg", "amount"];
 
+  state.stockListSource = "mainline";
   state.mode = "industry";
   state.selectedIndustry = targetIndustry;
   state.columns = columns;
   state.rows = rows;
   els.searchInput.value = "";
   els.industryBack.hidden = false;
+  syncTabPanels();
   els.industryPanel.hidden = true;
   els.predictionToolbar.hidden = true;
   els.detailPanel.hidden = true;
@@ -1453,7 +1495,10 @@ function showMainlineIndustryStocks(industry, date = state.selectedDate) {
 
 async function openMainlineIndustryStocks(industry) {
   const date = state.mainlineData?.date || state.selectedDate || state.latestDate;
-  switchTab("b1", { skipReload: true });
+  state.activeTab = "mainline";
+  document.querySelectorAll(".view-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === "mainline");
+  });
   showMainlineIndustryStocks(industry, date);
   els.summaryTitle.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -1586,7 +1631,11 @@ async function loadMainLine(date) {
 /* ── Tab Switching ── */
 
 function switchTab(tabName, options = {}) {
+  const previousStockListSource = state.stockListSource;
   state.activeTab = tabName;
+  if (tabName === "b1") {
+    state.stockListSource = "b1";
+  }
 
   // Update tab buttons
   document.querySelectorAll(".view-tab").forEach((btn) => {
@@ -1594,8 +1643,7 @@ function switchTab(tabName, options = {}) {
   });
 
   // Show/hide tab content
-  els.tabMainline.hidden = tabName !== "mainline";
-  els.tabB1.hidden = tabName !== "b1";
+  syncTabPanels();
 
   // Update subtitle
   if (tabName === "mainline") {
@@ -1608,9 +1656,16 @@ function switchTab(tabName, options = {}) {
   if (options.skipReload) return;
 
   if (tabName === "mainline") {
+    state.stockListSource = "b1";
+    syncTabPanels();
     loadMainLine(state.selectedDate);
   } else if (state.dateDataDate !== state.selectedDate) {
     loadDate(state.selectedDate);
+  } else if (previousStockListSource !== "b1" || state.mode === "industry") {
+    renderCachedDateData();
+  } else {
+    showListView();
+    updatePredictionToolbar();
   }
 }
 
@@ -1619,13 +1674,21 @@ function switchTab(tabName, options = {}) {
 async function onDateSelect(date) {
   state.selectedDate = date;
   state.mode = "date";
+  state.stockListSource = "b1";
   els.searchInput.value = "";
   renderDateTabs();
 
   if (state.activeTab === "mainline") {
+    els.industryBack.hidden = true;
+    els.listPanel.hidden = true;
+    els.detailPanel.hidden = true;
+    els.industryPanel.hidden = true;
+    els.predictionToolbar.hidden = true;
+    syncTabPanels();
     els.subtitle.textContent = `主线监控 · ${displayDate(date)}`;
     loadMainLine(date);
   } else {
+    syncTabPanels();
     loadDate(date);
   }
 }
@@ -1652,7 +1715,7 @@ async function init() {
 
     // Also preload B1 data in background
     Promise.all([
-      loadDate(payload.latest_date),
+      ensureDateData(payload.latest_date),
       loadIndustryTrends(),
     ]).catch(() => {});
   } catch (error) {
