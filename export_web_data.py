@@ -429,6 +429,43 @@ def export_mainline_data(db_path: Path, output_dir: Path, dates: list[str]) -> d
     except sqlite3.Error:
         return {}
 
+
+def collect_mainline_codes(db_path: Path, dates: list[str]) -> set[str]:
+    """Return stocks that appear in exported main-line industry pools."""
+    if not db_path.exists() or not dates:
+        return set()
+
+    try:
+        with sqlite3.connect(db_path) as conn:
+            exists = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='sector_ranking_history'"
+            ).fetchone()
+            if not exists:
+                return set()
+
+            ts_codes: set[str] = set()
+            for start in range(0, len(dates), 500):
+                chunk = dates[start : start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = conn.execute(
+                    f"""SELECT DISTINCT d.ts_code
+                        FROM sector_ranking_history r
+                        JOIN stock_basic s
+                          ON s.industry = r.industry
+                         AND COALESCE(s.delist_date, '') = ''
+                        JOIN daily d
+                          ON d.ts_code = s.ts_code
+                         AND d.trade_date = r.trade_date
+                        WHERE r.trade_date IN ({placeholders})
+                          AND r.rank <= 10""",
+                    chunk,
+                ).fetchall()
+                ts_codes.update(str(row[0]).strip().upper() for row in rows if row[0])
+            return ts_codes
+    except sqlite3.Error:
+        return set()
+
+
 def build_signal_dates(search_df: pd.DataFrame, db_path: Path) -> dict[str, list[str]]:
     """Collect every exported screening date for each stock code."""
     if search_df.empty or "signal_date" not in search_df.columns:
@@ -682,8 +719,11 @@ def export_static_data(
         else pd.DataFrame()
     )
     signal_dates = build_signal_dates(search_df, db_path)
+    mainline_index = export_mainline_data(db_path, output_dir, sorted(grouped))
+    export_codes = resolve_export_codes(collect_code_values(search_df), db_path)
+    export_codes.update(collect_mainline_codes(db_path, sorted(grouped)))
     kline_index = export_kline_data(
-        resolve_export_codes(collect_code_values(search_df), db_path),
+        export_codes,
         signal_dates,
         db_path,
         output_dir,
@@ -704,7 +744,6 @@ def export_static_data(
         output_dir / "industry_trends.json",
         build_industry_trends(daily_industry_counts, generated_at),
     )
-    mainline_index = export_mainline_data(db_path, output_dir, sorted(grouped))
 
     manifest = {
         "generated_at": generated_at,
