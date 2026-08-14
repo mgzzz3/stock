@@ -16,6 +16,7 @@ const state = {
   activeTab: "mainline",  // "mainline" | "b1"
   stockListSource: "b1",  // "b1" | "mainline"
   mainlineData: null,
+  conceptData: null,
 };
 
 const els = {
@@ -72,6 +73,8 @@ const els = {
   mainlineMeta: document.querySelector("#mainlineMeta"),
   mainlineCurrent: document.querySelector("#mainlineCurrent"),
   mainlineTableBody: document.querySelector("#mainlineTableBody"),
+  conceptSubtitle: document.querySelector("#conceptSubtitle"),
+  conceptTableBody: document.querySelector("#conceptTableBody"),
   /* Tabs */
   viewTabs: document.querySelector("#viewTabs"),
   tabMainline: document.querySelector("#tabMainline"),
@@ -1564,7 +1567,95 @@ function renderMainlineTable(sectors) {
   }
 }
 
+function renderConceptTable(concepts, emptyMessage = "暂无数据") {
+  els.conceptTableBody.innerHTML = "";
+  if (!concepts || !concepts.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 5;
+    td.className = "concept-empty";
+    td.textContent = emptyMessage;
+    tr.append(td);
+    els.conceptTableBody.append(tr);
+    return;
+  }
+
+  for (const concept of concepts) {
+    const tr = document.createElement("tr");
+    if (concept.rank === 1) tr.className = "row-top1";
+    else if (concept.rank <= 3) tr.className = "row-top2";
+
+    const rankCell = document.createElement("td");
+    const rankBadge = document.createElement("span");
+    rankBadge.className = `rank-num rank-${concept.rank <= 3 ? concept.rank : "other"}`;
+    rankBadge.textContent = concept.rank;
+    rankCell.append(rankBadge);
+
+    const nameCell = document.createElement("td");
+    nameCell.className = "concept-name";
+    nameCell.textContent = concept.concept_name;
+    nameCell.title = concept.index_code || concept.concept_code || concept.concept_name;
+
+    const changeCell = document.createElement("td");
+    changeCell.innerHTML = displayReturn(concept.pct_chg);
+
+    const flowCell = document.createElement("td");
+    flowCell.innerHTML = displayReturn(concept.net_inflow_billion, "亿");
+
+    const breadthCell = document.createElement("td");
+    breadthCell.innerHTML = displayReturn(concept.breadth_pct);
+
+    tr.append(rankCell, nameCell, changeCell, flowCell, breadthCell);
+    els.conceptTableBody.append(tr);
+  }
+}
+
+async function loadConceptRanking(date) {
+  els.conceptSubtitle.textContent = "加载中";
+  try {
+    const conceptIndex = state.manifest?.concept_index || {};
+    const availableDates = Object.keys(conceptIndex).sort();
+    let data = null;
+    let dataDate = null;
+
+    if (date) {
+      const priorDates = availableDates.filter((availableDate) => availableDate <= date);
+      dataDate = conceptIndex[date] ? date : priorDates[priorDates.length - 1] || null;
+      if (!dataDate) {
+        const firstDate = availableDates[0];
+        const message = firstDate
+          ? `概念历史从 ${displayDate(firstDate)} 开始`
+          : "暂无概念板块数据";
+        els.conceptSubtitle.textContent = message;
+        renderConceptTable([], message);
+        return;
+      }
+      data = await fetchJson(conceptIndex[dataDate]);
+    } else {
+      const latestPath = state.manifest?.concept_ranking;
+      if (latestPath) data = await fetchJson(latestPath);
+    }
+
+    if (!data || !Array.isArray(data.concepts)) {
+      throw new Error("暂无概念板块数据");
+    }
+    if (date !== state.selectedDate) return;
+
+    state.conceptData = data;
+    const actualDate = data.date || dataDate;
+    els.conceptSubtitle.textContent = actualDate !== date
+      ? `${displayDate(actualDate)}（当前日期沿用最近数据）`
+      : `${displayDate(actualDate)} · 数据源 ${data.source || "--"}`;
+    renderConceptTable(data.concepts);
+  } catch (error) {
+    if (date !== state.selectedDate) return;
+    els.conceptSubtitle.textContent = "读取失败";
+    renderConceptTable([], error.message || "读取失败");
+  }
+}
+
 async function loadMainLine(date) {
+  loadConceptRanking(date);
   try {
     let data;
     let triedApi = false;

@@ -83,6 +83,22 @@ CREATE TABLE IF NOT EXISTS signals (
 );
 
 CREATE INDEX IF NOT EXISTS idx_signals_strategy_date ON signals(strategy, trade_date);
+
+CREATE TABLE IF NOT EXISTS concept_ranking_history (
+    trade_date          TEXT NOT NULL,
+    concept_code        TEXT NOT NULL,
+    concept_name        TEXT NOT NULL,
+    index_code          TEXT,
+    rank                INTEGER NOT NULL,
+    pct_chg             REAL,
+    net_inflow_billion  REAL,
+    breadth_pct         REAL,
+    source              TEXT NOT NULL,
+    PRIMARY KEY (trade_date, concept_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_concept_ranking_date_rank
+    ON concept_ranking_history(trade_date, rank);
 """
 
 

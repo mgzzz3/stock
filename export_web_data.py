@@ -430,6 +430,77 @@ def export_mainline_data(db_path: Path, output_dir: Path, dates: list[str]) -> d
         return {}
 
 
+def build_concept_payload(conn: sqlite3.Connection, date: str) -> dict[str, object] | None:
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        """SELECT trade_date, concept_code, concept_name, index_code, rank,
+                  pct_chg, net_inflow_billion, breadth_pct, source
+           FROM concept_ranking_history
+           WHERE trade_date = ?
+           ORDER BY rank
+           LIMIT 10""",
+        (date,),
+    ).fetchall()
+    if not rows:
+        return None
+
+    return {
+        "date": date,
+        "source": rows[0]["source"],
+        "ranking_basis": "daily_pct_chg",
+        "concepts": [
+            {
+                "rank": int(row["rank"]),
+                "concept_code": row["concept_code"],
+                "concept_name": row["concept_name"],
+                "index_code": row["index_code"],
+                "pct_chg": round(float(row["pct_chg"]), 2) if row["pct_chg"] is not None else None,
+                "net_inflow_billion": (
+                    round(float(row["net_inflow_billion"]), 2)
+                    if row["net_inflow_billion"] is not None
+                    else None
+                ),
+                "breadth_pct": (
+                    round(float(row["breadth_pct"]), 1)
+                    if row["breadth_pct"] is not None
+                    else None
+                ),
+            }
+            for row in rows
+        ],
+    }
+
+
+def export_concept_data(db_path: Path, output_dir: Path, dates: list[str]) -> dict[str, str]:
+    if not db_path.exists() or not dates:
+        return {}
+    try:
+        with sqlite3.connect(db_path) as conn:
+            exists = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='concept_ranking_history'"
+            ).fetchone()
+            if not exists:
+                return {}
+
+            index = {}
+            for date in dates:
+                payload = build_concept_payload(conn, date)
+                if not payload:
+                    continue
+                path = output_dir / "concepts" / f"{date}.json"
+                write_json(path, payload)
+                index[date] = f"data/concepts/{date}.json"
+
+            if index:
+                latest_date = max(index)
+                latest_payload = build_concept_payload(conn, latest_date)
+                if latest_payload:
+                    write_json(output_dir / "concept_ranking.json", latest_payload)
+            return index
+    except sqlite3.Error:
+        return {}
+
+
 def collect_mainline_codes(db_path: Path, dates: list[str]) -> set[str]:
     """Return stocks that appear in exported main-line industry pools."""
     if not db_path.exists() or not dates:
@@ -720,6 +791,7 @@ def export_static_data(
     )
     signal_dates = build_signal_dates(search_df, db_path)
     mainline_index = export_mainline_data(db_path, output_dir, sorted(grouped))
+    concept_index = export_concept_data(db_path, output_dir, sorted(grouped))
     export_codes = resolve_export_codes(collect_code_values(search_df), db_path)
     export_codes.update(collect_mainline_codes(db_path, sorted(grouped)))
     kline_index = export_kline_data(
@@ -753,6 +825,8 @@ def export_static_data(
         "industry_trends": "data/industry_trends.json",
         "mainline": "data/main_line.json" if mainline_index else None,
         "mainline_index": mainline_index,
+        "concept_ranking": "data/concept_ranking.json" if concept_index else None,
+        "concept_index": concept_index,
         "kline_limit": kline_limit,
         "kline_count": len({path for key, path in kline_index.items() if "." in key}),
         "kline_index": kline_index,

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A 股信号浏览</title>
-    <link rel="stylesheet" href="styles.css?v=mainline-industry-1" />
+    <link rel="stylesheet" href="styles.css?v=concept-ranking-1" />
   </head>
   <body>
     <main class="shell">
@@ -95,6 +95,25 @@
                 </tr>
               </thead>
               <tbody id="mainlineTableBody"></tbody>
+            </table>
+          </div>
+
+          <div class="mainline-table-wrap concept-table-wrap">
+            <div class="chart-head">
+              <strong>概念板块涨幅榜</strong>
+              <span id="conceptSubtitle">加载中</span>
+            </div>
+            <table class="mainline-table concept-table">
+              <thead>
+                <tr>
+                  <th>排名</th>
+                  <th>概念板块</th>
+                  <th>当日涨幅</th>
+                  <th>主力净流入(亿)</th>
+                  <th>上涨占比</th>
+                </tr>
+              </thead>
+              <tbody id="conceptTableBody"></tbody>
             </table>
           </div>
         </section>
@@ -224,6 +243,6 @@
       </div>
     </main>
 
-    <script src="app.js?v=tab-layout-6" defer></script>
+    <script src="app.js?v=concept-ranking-1" defer></script>
   </body>
 </html>

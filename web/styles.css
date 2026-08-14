@@ -1159,6 +1159,29 @@ td[data-col="bull_bear"] {
   scrollbar-width: thin;
 }
 
+.concept-table-wrap {
+  margin-top: 12px;
+}
+
+.concept-table {
+  min-width: 560px;
+}
+
+.concept-table .concept-name {
+  max-width: 260px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.concept-table .concept-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--muted);
+}
+
 .mainline-table {
   min-width: 680px;
   font-size: 13px;
@@ -1490,4 +1513,8 @@ td[data-col="reasons"] {
 .mainline-industry-button:hover {
   color: var(--accent-strong);
   text-decoration: underline;
+}
+
+.concept-table tbody tr {
+  cursor: default;
 }
