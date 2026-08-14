@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A 股信号浏览</title>
-    <link rel="stylesheet" href="styles.css?v=concept-members-1" />
+    <link rel="stylesheet" href="styles.css?v=concept-focus-1" />
   </head>
   <body>
     <main class="shell">
@@ -114,6 +114,26 @@
                 </tr>
               </thead>
               <tbody id="conceptTableBody"></tbody>
+            </table>
+          </div>
+
+          <div class="mainline-table-wrap focus-stock-wrap" id="focusStockSection">
+            <div class="chart-head">
+              <strong>重点股票</strong>
+              <span id="focusStockMeta">加载中</span>
+            </div>
+            <table class="mainline-table focus-stock-table">
+              <thead>
+                <tr>
+                  <th>排名</th>
+                  <th>股票</th>
+                  <th>代码</th>
+                  <th>概念数</th>
+                  <th>所属概念</th>
+                  <th>当日涨幅</th>
+                </tr>
+              </thead>
+              <tbody id="focusStockTableBody"></tbody>
             </table>
           </div>
         </section>
@@ -243,6 +263,6 @@
       </div>
     </main>
 
-    <script src="app.js?v=concept-members-1" defer></script>
+    <script src="app.js?v=concept-focus-1" defer></script>
   </body>
 </html>

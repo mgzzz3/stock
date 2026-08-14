@@ -1163,6 +1163,10 @@ td[data-col="bull_bear"] {
   margin-top: 12px;
 }
 
+.focus-stock-wrap {
+  margin-top: 12px;
+}
+
 .concept-table {
   min-width: 560px;
 }
@@ -1180,6 +1184,39 @@ td[data-col="bull_bear"] {
   padding: 20px;
   text-align: center;
   color: var(--muted);
+}
+
+.mainline-table.focus-stock-table {
+  min-width: 820px;
+}
+
+.focus-stock-table .focus-stock-name,
+.focus-stock-table .focus-concepts {
+  text-align: left;
+}
+
+.focus-stock-table .focus-stock-name {
+  max-width: 160px;
+  font-weight: 700;
+}
+
+.focus-stock-table .focus-concepts {
+  min-width: 320px;
+  color: #40505b;
+  line-height: 1.5;
+}
+
+.focus-concept-count {
+  display: inline-grid;
+  min-width: 28px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid #e7b28d;
+  border-radius: 999px;
+  background: #fff4e6;
+  color: #9a3412;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .mainline-table {

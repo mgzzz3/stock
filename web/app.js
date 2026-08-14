@@ -17,6 +17,8 @@ const state = {
   stockListSource: "b1",  // "b1" | "mainline"
   mainlineData: null,
   conceptData: null,
+  focusStocks: [],
+  detailReturnTarget: null,
 };
 
 const els = {
@@ -75,6 +77,9 @@ const els = {
   mainlineTableBody: document.querySelector("#mainlineTableBody"),
   conceptSubtitle: document.querySelector("#conceptSubtitle"),
   conceptTableBody: document.querySelector("#conceptTableBody"),
+  focusStockSection: document.querySelector("#focusStockSection"),
+  focusStockMeta: document.querySelector("#focusStockMeta"),
+  focusStockTableBody: document.querySelector("#focusStockTableBody"),
   /* Tabs */
   viewTabs: document.querySelector("#viewTabs"),
   tabMainline: document.querySelector("#tabMainline"),
@@ -650,20 +655,25 @@ function showIndustryStocks(industry, date = state.selectedDate) {
   renderMobile(columns, rows);
 }
 
+function showMainlineDashboard(scrollTarget = els.mainlinePanel) {
+  state.mode = "date";
+  state.selectedIndustry = null;
+  state.stockListSource = "b1";
+  state.detailReturnTarget = null;
+  els.searchInput.value = "";
+  els.industryBack.hidden = true;
+  els.listPanel.hidden = true;
+  els.detailPanel.hidden = true;
+  els.industryPanel.hidden = true;
+  els.predictionToolbar.hidden = true;
+  syncTabPanels();
+  els.subtitle.textContent = `主线监控 · ${displayDate(state.selectedDate)}`;
+  scrollTarget?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function backToIndustryList() {
   if (state.stockListSource === "mainline") {
-    state.mode = "date";
-    state.selectedIndustry = null;
-    state.stockListSource = "b1";
-    els.searchInput.value = "";
-    els.industryBack.hidden = true;
-    els.listPanel.hidden = true;
-    els.detailPanel.hidden = true;
-    els.industryPanel.hidden = true;
-    els.predictionToolbar.hidden = true;
-    syncTabPanels();
-    els.subtitle.textContent = `主线监控 · ${displayDate(state.selectedDate)}`;
-    els.mainlinePanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    showMainlineDashboard();
     return;
   }
 
@@ -744,7 +754,8 @@ function renderCachedDateData() {
   });
 }
 
-function showStockDetail(tsCode, name) {
+function showStockDetail(tsCode, name, options = {}) {
+  state.detailReturnTarget = options.returnTarget || null;
   syncTabPanels();
   els.listPanel.hidden = true;
   els.industryPanel.hidden = true;
@@ -782,6 +793,10 @@ function showStockDetail(tsCode, name) {
 }
 
 function backToList() {
+  if (state.detailReturnTarget === "focus-stocks") {
+    showMainlineDashboard(els.focusStockSection);
+    return;
+  }
   showListView();
   updatePredictionToolbar();
 }
@@ -1627,6 +1642,123 @@ function renderConceptTable(concepts, emptyMessage = "暂无数据") {
   }
 }
 
+function buildFocusStocks(concepts) {
+  const stockMap = new Map();
+
+  for (const concept of concepts || []) {
+    const conceptName = String(concept.concept_name || "").trim();
+    for (const stock of concept.stocks || []) {
+      const tsCode = String(stock.ts_code || "").trim().toUpperCase();
+      if (!tsCode || !conceptName) continue;
+
+      let item = stockMap.get(tsCode);
+      if (!item) {
+        item = { ...stock, ts_code: tsCode, concept_names: [] };
+        stockMap.set(tsCode, item);
+      }
+      if (!item.concept_names.includes(conceptName)) {
+        item.concept_names.push(conceptName);
+      }
+    }
+  }
+
+  const valueForSort = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) ? number : Number.NEGATIVE_INFINITY;
+  };
+
+  return [...stockMap.values()]
+    .filter((stock) => stock.concept_names.length >= 2)
+    .sort((left, right) => (
+      right.concept_names.length - left.concept_names.length
+      || valueForSort(right.pct_chg) - valueForSort(left.pct_chg)
+      || valueForSort(right.amount) - valueForSort(left.amount)
+      || left.ts_code.localeCompare(right.ts_code)
+    ))
+    .map((stock, index) => ({
+      ...stock,
+      concept_count: stock.concept_names.length,
+      focus_rank: index + 1,
+    }));
+}
+
+function openFocusStockDetail(stock) {
+  const date = state.conceptData?.date || state.selectedDate || state.latestDate;
+  state.activeTab = "mainline";
+  state.stockListSource = "mainline";
+  state.mode = "focus-stocks";
+  document.querySelectorAll(".view-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === "mainline");
+  });
+  els.industryBack.hidden = true;
+  els.modeLabel.textContent = "重点股票";
+  els.summaryTitle.textContent = stock.name || stock.ts_code;
+  els.summaryMeta.textContent = `${displayDate(date)} · 命中 ${stock.concept_count} 个概念`;
+  els.subtitle.textContent = `重点股票 · ${displayDate(date)} · ${stock.name || stock.ts_code}`;
+  showStockDetail(stock.ts_code, stock.name, { returnTarget: "focus-stocks" });
+}
+
+function renderFocusStockTable(concepts, emptyMessage = "暂无重点股票") {
+  const stocks = buildFocusStocks(concepts);
+  state.focusStocks = stocks;
+  els.focusStockTableBody.innerHTML = "";
+  els.focusStockMeta.textContent = stocks.length
+    ? `${stocks.length} 只 · 至少命中 2 个榜单概念`
+    : emptyMessage;
+
+  if (!stocks.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 6;
+    td.className = "concept-empty";
+    td.textContent = emptyMessage;
+    tr.append(td);
+    els.focusStockTableBody.append(tr);
+    return;
+  }
+
+  for (const stock of stocks) {
+    const tr = document.createElement("tr");
+    tr.title = `查看 ${stock.name || stock.ts_code} 日线详情`;
+    tr.addEventListener("click", () => openFocusStockDetail(stock));
+
+    const rankCell = document.createElement("td");
+    const rankBadge = document.createElement("span");
+    rankBadge.className = `rank-num rank-${stock.focus_rank <= 3 ? stock.focus_rank : "other"}`;
+    rankBadge.textContent = stock.focus_rank;
+    rankCell.append(rankBadge);
+
+    const nameCell = document.createElement("td");
+    nameCell.className = "focus-stock-name";
+    const nameButton = document.createElement("button");
+    nameButton.type = "button";
+    nameButton.className = "mainline-industry-button";
+    nameButton.textContent = stock.name || stock.ts_code;
+    nameButton.title = `查看 ${stock.name || stock.ts_code} 日线详情`;
+    nameCell.append(nameButton);
+
+    const codeCell = document.createElement("td");
+    codeCell.textContent = stock.ts_code;
+
+    const countCell = document.createElement("td");
+    const countBadge = document.createElement("span");
+    countBadge.className = "focus-concept-count";
+    countBadge.textContent = stock.concept_count;
+    countCell.append(countBadge);
+
+    const conceptsCell = document.createElement("td");
+    conceptsCell.className = "focus-concepts";
+    conceptsCell.textContent = stock.concept_names.join(" · ");
+    conceptsCell.title = stock.concept_names.join("、");
+
+    const changeCell = document.createElement("td");
+    changeCell.innerHTML = displayReturn(stock.pct_chg);
+
+    tr.append(rankCell, nameCell, codeCell, countCell, conceptsCell, changeCell);
+    els.focusStockTableBody.append(tr);
+  }
+}
+
 function showConceptStocks(concept, date = state.selectedDate) {
   const conceptName = concept.concept_name || "概念板块";
   const rows = Array.isArray(concept.stocks) ? concept.stocks : [];
@@ -1684,6 +1816,7 @@ async function loadConceptRanking(date) {
           : "暂无概念板块数据";
         els.conceptSubtitle.textContent = message;
         renderConceptTable([], message);
+        renderFocusStockTable([], message);
         return;
       }
       data = await fetchJson(conceptIndex[dataDate]);
@@ -1703,10 +1836,12 @@ async function loadConceptRanking(date) {
       ? `${displayDate(actualDate)}（当前日期沿用最近数据）`
       : `${displayDate(actualDate)} · 数据源 ${data.source || "--"}`;
     renderConceptTable(data.concepts);
+    renderFocusStockTable(data.concepts);
   } catch (error) {
     if (date !== state.selectedDate) return;
     els.conceptSubtitle.textContent = "读取失败";
     renderConceptTable([], error.message || "读取失败");
+    renderFocusStockTable([], error.message || "读取失败");
   }
 }
 
