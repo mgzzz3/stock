@@ -634,6 +634,7 @@ function showIndustryStocks(industry, date = state.selectedDate) {
   state.rows = rows;
   els.searchInput.value = "";
   els.industryBack.hidden = false;
+  els.industryBack.textContent = "← 返回行业列表";
   els.industryPanel.hidden = true;
   els.predictionToolbar.hidden = true;
   els.detailPanel.hidden = true;
@@ -1480,6 +1481,7 @@ function showMainlineIndustryStocks(industry, date = state.selectedDate) {
   state.rows = rows;
   els.searchInput.value = "";
   els.industryBack.hidden = false;
+  els.industryBack.textContent = "← 返回主线";
   syncTabPanels();
   els.industryPanel.hidden = true;
   els.predictionToolbar.hidden = true;
@@ -1584,6 +1586,14 @@ function renderConceptTable(concepts, emptyMessage = "暂无数据") {
     const tr = document.createElement("tr");
     if (concept.rank === 1) tr.className = "row-top1";
     else if (concept.rank <= 3) tr.className = "row-top2";
+    const stocks = Array.isArray(concept.stocks) ? concept.stocks : [];
+    if (stocks.length) {
+      tr.title = `查看 ${concept.concept_name} 成分股列表`;
+      tr.addEventListener("click", () => openConceptStocks(concept));
+    } else {
+      tr.classList.add("concept-row-disabled");
+      tr.title = "当前日期暂无成分股数据";
+    }
 
     const rankCell = document.createElement("td");
     const rankBadge = document.createElement("span");
@@ -1593,8 +1603,15 @@ function renderConceptTable(concepts, emptyMessage = "暂无数据") {
 
     const nameCell = document.createElement("td");
     nameCell.className = "concept-name";
-    nameCell.textContent = concept.concept_name;
-    nameCell.title = concept.index_code || concept.concept_code || concept.concept_name;
+    const nameButton = document.createElement("button");
+    nameButton.type = "button";
+    nameButton.className = "mainline-industry-button";
+    nameButton.textContent = concept.concept_name;
+    nameButton.disabled = stocks.length === 0;
+    nameButton.title = stocks.length
+      ? `查看 ${concept.concept_name} 的 ${stocks.length} 只成分股`
+      : "当前日期暂无成分股数据";
+    nameCell.append(nameButton);
 
     const changeCell = document.createElement("td");
     changeCell.innerHTML = displayReturn(concept.pct_chg);
@@ -1608,6 +1625,45 @@ function renderConceptTable(concepts, emptyMessage = "暂无数据") {
     tr.append(rankCell, nameCell, changeCell, flowCell, breadthCell);
     els.conceptTableBody.append(tr);
   }
+}
+
+function showConceptStocks(concept, date = state.selectedDate) {
+  const conceptName = concept.concept_name || "概念板块";
+  const rows = Array.isArray(concept.stocks) ? concept.stocks : [];
+  const columns = ["trade_date", "ts_code", "name", "industry", "close", "pct_chg", "amount"];
+
+  state.stockListSource = "mainline";
+  state.mode = "concept";
+  state.selectedIndustry = conceptName;
+  state.columns = columns;
+  state.rows = rows;
+  els.searchInput.value = "";
+  els.industryBack.hidden = false;
+  els.industryBack.textContent = "← 返回概念榜";
+  syncTabPanels();
+  els.industryPanel.hidden = true;
+  els.predictionToolbar.hidden = true;
+  els.detailPanel.hidden = true;
+  els.listPanel.hidden = false;
+  els.modeLabel.textContent = "概念板块";
+  els.summaryTitle.textContent = conceptName;
+  els.summaryMeta.textContent = `${displayDate(date)} · ${rows.length} 只股票 · 点击股票进入详情`;
+  els.subtitle.textContent = `概念板块 · ${displayDate(date)} · ${conceptName}`;
+  els.emptyState.hidden = rows.length > 0;
+  els.emptyState.textContent = `${displayDate(date)} 暂无 ${conceptName} 成分股数据`;
+  renderDateTabs();
+  renderTable(columns, rows);
+  renderMobile(columns, rows);
+}
+
+function openConceptStocks(concept) {
+  const date = state.conceptData?.date || state.selectedDate || state.latestDate;
+  state.activeTab = "mainline";
+  document.querySelectorAll(".view-tab").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tab === "mainline");
+  });
+  showConceptStocks(concept, date);
+  els.summaryTitle.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function loadConceptRanking(date) {

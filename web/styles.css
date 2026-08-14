@@ -1516,5 +1516,16 @@ td[data-col="reasons"] {
 }
 
 .concept-table tbody tr {
-  cursor: default;
+  cursor: pointer;
+}
+
+.concept-table tbody tr.concept-row-disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.concept-table .mainline-industry-button:disabled {
+  color: inherit;
+  cursor: not-allowed;
+  text-decoration: none;
 }

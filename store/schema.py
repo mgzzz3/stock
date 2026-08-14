@@ -99,6 +99,18 @@ CREATE TABLE IF NOT EXISTS concept_ranking_history (
 
 CREATE INDEX IF NOT EXISTS idx_concept_ranking_date_rank
     ON concept_ranking_history(trade_date, rank);
+
+CREATE TABLE IF NOT EXISTS concept_member_history (
+    trade_date    TEXT NOT NULL,
+    concept_code  TEXT NOT NULL,
+    ts_code       TEXT NOT NULL,
+    stock_name    TEXT,
+    member_rank   INTEGER NOT NULL,
+    PRIMARY KEY (trade_date, concept_code, ts_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_concept_member_date_concept
+    ON concept_member_history(trade_date, concept_code, member_rank);
 """
 
 

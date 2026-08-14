@@ -430,6 +430,42 @@ def export_mainline_data(db_path: Path, output_dir: Path, dates: list[str]) -> d
         return {}
 
 
+def build_concept_stock_rows(
+    conn: sqlite3.Connection,
+    date: str,
+    concept_code: str,
+) -> list[dict[str, object]]:
+    try:
+        rows = conn.execute(
+            """SELECT m.ts_code,
+                      COALESCE(s.name, m.stock_name) AS name,
+                      s.industry, d.close, d.pct_chg, d.amount
+               FROM concept_member_history m
+               LEFT JOIN stock_basic s ON s.ts_code = m.ts_code
+               LEFT JOIN daily d
+                 ON d.ts_code = m.ts_code
+                AND d.trade_date = m.trade_date
+               WHERE m.trade_date = ? AND m.concept_code = ?
+               ORDER BY m.member_rank, m.ts_code""",
+            (date, concept_code),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+
+    return [
+        {
+            "trade_date": date,
+            "ts_code": row["ts_code"],
+            "name": row["name"],
+            "industry": row["industry"],
+            "close": round(float(row["close"]), 2) if row["close"] is not None else None,
+            "pct_chg": round(float(row["pct_chg"]), 2) if row["pct_chg"] is not None else None,
+            "amount": round(float(row["amount"]), 2) if row["amount"] is not None else None,
+        }
+        for row in rows
+    ]
+
+
 def build_concept_payload(conn: sqlite3.Connection, date: str) -> dict[str, object] | None:
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
@@ -465,6 +501,7 @@ def build_concept_payload(conn: sqlite3.Connection, date: str) -> dict[str, obje
                     if row["breadth_pct"] is not None
                     else None
                 ),
+                "stocks": build_concept_stock_rows(conn, date, row["concept_code"]),
             }
             for row in rows
         ],
@@ -499,6 +536,38 @@ def export_concept_data(db_path: Path, output_dir: Path, dates: list[str]) -> di
             return index
     except sqlite3.Error:
         return {}
+
+
+def collect_concept_codes(db_path: Path, dates: list[str]) -> set[str]:
+    """Return stocks belonging to exported top-ten concept boards."""
+    if not db_path.exists() or not dates:
+        return set()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            exists = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='concept_member_history'"
+            ).fetchone()
+            if not exists:
+                return set()
+
+            ts_codes = set()
+            for start in range(0, len(dates), 500):
+                chunk = dates[start : start + 500]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = conn.execute(
+                    f"""SELECT DISTINCT m.ts_code
+                        FROM concept_member_history m
+                        JOIN concept_ranking_history r
+                          ON r.trade_date = m.trade_date
+                         AND r.concept_code = m.concept_code
+                        WHERE m.trade_date IN ({placeholders})
+                          AND r.rank <= 10""",
+                    chunk,
+                ).fetchall()
+                ts_codes.update(str(row[0]).strip().upper() for row in rows if row[0])
+            return ts_codes
+    except sqlite3.Error:
+        return set()
 
 
 def collect_mainline_codes(db_path: Path, dates: list[str]) -> set[str]:
@@ -794,6 +863,7 @@ def export_static_data(
     concept_index = export_concept_data(db_path, output_dir, sorted(grouped))
     export_codes = resolve_export_codes(collect_code_values(search_df), db_path)
     export_codes.update(collect_mainline_codes(db_path, sorted(grouped)))
+    export_codes.update(collect_concept_codes(db_path, sorted(grouped)))
     kline_index = export_kline_data(
         export_codes,
         signal_dates,
