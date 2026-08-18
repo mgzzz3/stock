@@ -1186,6 +1186,11 @@ td[data-col="bull_bear"] {
   color: var(--muted);
 }
 
+.concept-table .concept-limit-up-count {
+  color: var(--danger);
+  font-weight: 800;
+}
+
 .mainline-table.focus-stock-table {
   min-width: 820px;
 }

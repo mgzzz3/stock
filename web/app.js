@@ -1589,7 +1589,7 @@ function renderConceptTable(concepts, emptyMessage = "暂无数据") {
   if (!concepts || !concepts.length) {
     const tr = document.createElement("tr");
     const td = document.createElement("td");
-    td.colSpan = 5;
+    td.colSpan = 6;
     td.className = "concept-empty";
     td.textContent = emptyMessage;
     tr.append(td);
@@ -1631,13 +1631,19 @@ function renderConceptTable(concepts, emptyMessage = "暂无数据") {
     const changeCell = document.createElement("td");
     changeCell.innerHTML = displayReturn(concept.pct_chg);
 
+    const limitUpCell = document.createElement("td");
+    limitUpCell.className = "concept-limit-up-count";
+    limitUpCell.textContent = Number.isInteger(concept.limit_up_count)
+      ? concept.limit_up_count
+      : "--";
+
     const flowCell = document.createElement("td");
     flowCell.innerHTML = displayReturn(concept.net_inflow_billion, "亿");
 
     const breadthCell = document.createElement("td");
     breadthCell.innerHTML = displayReturn(concept.breadth_pct);
 
-    tr.append(rankCell, nameCell, changeCell, flowCell, breadthCell);
+    tr.append(rankCell, nameCell, changeCell, limitUpCell, flowCell, breadthCell);
     els.conceptTableBody.append(tr);
   }
 }

@@ -19,6 +19,7 @@ import re
 import shutil
 import sqlite3
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
 
 import pandas as pd
@@ -44,6 +45,8 @@ CODE_COLUMNS = (
 )
 TS_CODE_RE = re.compile(r"^\d{6}\.(SH|SZ|BJ)$", re.IGNORECASE)
 SYMBOL_RE = re.compile(r"^\d{6}$")
+PRICE_TICK = Decimal("0.01")
+MAIN_BOARD_ST_LIMIT_CHANGE_DATE = "20260706"
 
 
 def parse_args() -> argparse.Namespace:
@@ -430,16 +433,57 @@ def export_mainline_data(db_path: Path, output_dir: Path, dates: list[str]) -> d
         return {}
 
 
-def build_concept_stock_rows(
+def _price_limit_rate(ts_code: str, stock_name: str | None, trade_date: str) -> Decimal:
+    """Return the daily upper-price-limit rate for an A-share stock."""
+    normalized_code = str(ts_code or "").upper()
+    symbol = normalized_code.split(".", 1)[0]
+    if normalized_code.endswith(".BJ"):
+        return Decimal("0.30")
+    if symbol.startswith(("300", "301", "688", "689")):
+        return Decimal("0.20")
+
+    normalized_name = str(stock_name or "").upper().lstrip("*")
+    if normalized_name.startswith("ST") and trade_date < MAIN_BOARD_ST_LIMIT_CHANGE_DATE:
+        return Decimal("0.05")
+    return Decimal("0.10")
+
+
+def is_stock_limit_up(
+    ts_code: str,
+    stock_name: str | None,
+    trade_date: str,
+    pre_close: object,
+    close: object,
+) -> bool:
+    """Return whether the stock closed at its rounded daily upper limit."""
+    if pre_close is None or close is None:
+        return False
+    try:
+        previous = Decimal(str(pre_close))
+        current = Decimal(str(close)).quantize(PRICE_TICK, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    if previous <= 0:
+        return False
+
+    rate = _price_limit_rate(ts_code, stock_name, trade_date)
+    upper_limit = (previous * (Decimal("1") + rate)).quantize(
+        PRICE_TICK,
+        rounding=ROUND_HALF_UP,
+    )
+    return current == upper_limit
+
+
+def _build_concept_stock_data(
     conn: sqlite3.Connection,
     date: str,
     concept_code: str,
-) -> list[dict[str, object]]:
+) -> tuple[list[dict[str, object]], int | None]:
     try:
         rows = conn.execute(
             """SELECT m.ts_code,
                       COALESCE(s.name, m.stock_name) AS name,
-                      s.industry, d.close, d.pct_chg, d.amount
+                      s.industry, d.pre_close, d.close, d.pct_chg, d.amount
                FROM concept_member_history m
                LEFT JOIN stock_basic s ON s.ts_code = m.ts_code
                LEFT JOIN daily d
@@ -450,20 +494,52 @@ def build_concept_stock_rows(
             (date, concept_code),
         ).fetchall()
     except sqlite3.OperationalError:
-        return []
+        return [], None
 
-    return [
-        {
-            "trade_date": date,
-            "ts_code": row["ts_code"],
-            "name": row["name"],
-            "industry": row["industry"],
-            "close": round(float(row["close"]), 2) if row["close"] is not None else None,
-            "pct_chg": round(float(row["pct_chg"]), 2) if row["pct_chg"] is not None else None,
-            "amount": round(float(row["amount"]), 2) if row["amount"] is not None else None,
-        }
-        for row in rows
-    ]
+    stock_rows = []
+    limit_up_count = 0
+    stocks_with_prices = 0
+    for row in rows:
+        stock_rows.append(
+            {
+                "trade_date": date,
+                "ts_code": row["ts_code"],
+                "name": row["name"],
+                "industry": row["industry"],
+                "close": (
+                    round(float(row["close"]), 2) if row["close"] is not None else None
+                ),
+                "pct_chg": (
+                    round(float(row["pct_chg"]), 2)
+                    if row["pct_chg"] is not None
+                    else None
+                ),
+                "amount": (
+                    round(float(row["amount"]), 2)
+                    if row["amount"] is not None
+                    else None
+                ),
+            }
+        )
+        if row["pre_close"] is not None and row["close"] is not None:
+            stocks_with_prices += 1
+        if is_stock_limit_up(
+            row["ts_code"],
+            row["name"],
+            date,
+            row["pre_close"],
+            row["close"],
+        ):
+            limit_up_count += 1
+    return stock_rows, limit_up_count if stocks_with_prices else None
+
+
+def build_concept_stock_rows(
+    conn: sqlite3.Connection,
+    date: str,
+    concept_code: str,
+) -> list[dict[str, object]]:
+    return _build_concept_stock_data(conn, date, concept_code)[0]
 
 
 def build_concept_payload(conn: sqlite3.Connection, date: str) -> dict[str, object] | None:
@@ -480,11 +556,10 @@ def build_concept_payload(conn: sqlite3.Connection, date: str) -> dict[str, obje
     if not rows:
         return None
 
-    return {
-        "date": date,
-        "source": rows[0]["source"],
-        "ranking_basis": "daily_pct_chg",
-        "concepts": [
+    concepts = []
+    for row in rows:
+        stocks, limit_up_count = _build_concept_stock_data(conn, date, row["concept_code"])
+        concepts.append(
             {
                 "rank": int(row["rank"]),
                 "concept_code": row["concept_code"],
@@ -501,10 +576,16 @@ def build_concept_payload(conn: sqlite3.Connection, date: str) -> dict[str, obje
                     if row["breadth_pct"] is not None
                     else None
                 ),
-                "stocks": build_concept_stock_rows(conn, date, row["concept_code"]),
+                "limit_up_count": limit_up_count,
+                "stocks": stocks,
             }
-            for row in rows
-        ],
+        )
+
+    return {
+        "date": date,
+        "source": rows[0]["source"],
+        "ranking_basis": "daily_pct_chg",
+        "concepts": concepts,
     }
 
 
