@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A 股信号浏览</title>
-    <link rel="stylesheet" href="styles.css?v=concept-limit-up-1" />
+    <link rel="stylesheet" href="styles.css?v=strategy-status-guide-1" />
   </head>
   <body>
     <main class="shell">
@@ -20,6 +20,7 @@
         <nav class="view-tabs" id="viewTabs" aria-label="视图切换">
           <button type="button" class="view-tab active" data-tab="mainline">🔥 主线</button>
           <button type="button" class="view-tab" data-tab="b1">B1</button>
+          <button type="button" class="view-tab" data-tab="strategy">策略</button>
         </nav>
 
         <form class="search" id="searchForm">
@@ -137,6 +138,142 @@
               <tbody id="focusStockTableBody"></tbody>
             </table>
           </div>
+        </section>
+      </div>
+
+      <!-- ════ 策略 Tab ════ -->
+      <div class="tab-content" id="tabStrategy" data-tab="strategy" hidden>
+        <section class="strategy-panel" aria-label="量化策略与推荐">
+          <div class="section-head strategy-page-head">
+            <div>
+              <div class="strategy-heading-row">
+                <h2>策略决策台</h2>
+                <details class="strategy-status-guide">
+                  <summary>状态说明</summary>
+                  <div class="strategy-status-guide-panel" role="note" aria-label="策略状态名称解释">
+                    <div class="strategy-status-guide-head">
+                      <strong>策略状态怎么理解</strong>
+                      <span>状态决定是否允许下单，不代表未来一定盈利</span>
+                    </div>
+                    <dl class="strategy-status-guide-list">
+                      <div>
+                        <dt><span class="strategy-guide-tag guide-active">允许执行</span></dt>
+                        <dd>滚动、冻结留出和市场等全部门控通过，可按既定仓位纪律生成候选。</dd>
+                      </div>
+                      <div>
+                        <dt><span class="strategy-guide-tag guide-active">滚动通过</span></dt>
+                        <dd>最近滚动训练窗口的样本数、净收益、基准超额和胜率均达到门槛。</dd>
+                      </div>
+                      <div>
+                        <dt><span class="strategy-guide-tag guide-watch">滚动未通过</span></dt>
+                        <dd>最近窗口至少一项门槛失败；即使今天出现信号，也只能观察，不能下单。</dd>
+                      </div>
+                      <div>
+                        <dt><span class="strategy-guide-tag guide-watch">冻结留出不足</span></dt>
+                        <dd>策略定稿后的独立样本还没积累到最低数量，暂时无法证明能用于实盘。</dd>
+                      </div>
+                      <div>
+                        <dt><span class="strategy-guide-tag guide-danger">冻结留出未通过</span></dt>
+                        <dd>独立样本数量已足够，但收益、净值或最大回撤没有达到执行标准。</dd>
+                      </div>
+                      <div>
+                        <dt><span class="strategy-guide-tag guide-watch">市场门控关闭</span></dt>
+                        <dd>策略本身可能合格，但当前市场环境不符合规则，本期保持空仓。</dd>
+                      </div>
+                      <div>
+                        <dt><span class="strategy-guide-tag guide-research">数据验证中 / 观察验证</span></dt>
+                        <dd>历史长度、样本外表现或优势证据仍不充分，只进入研究池。</dd>
+                      </div>
+                      <div>
+                        <dt><span class="strategy-guide-tag guide-research">人工尽调必需</span></dt>
+                        <dd>量化筛选仅是第一关，还要人工确认商业模式、护城河、管理层和估值。</dd>
+                      </div>
+                      <div>
+                        <dt><span class="strategy-guide-tag guide-retired">已停用</span></dt>
+                        <dd>策略已明确禁用，只保留历史审计数据，不会产生任何买入指令。</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </details>
+              </div>
+              <p id="strategySubtitle">加载策略、荐股与历史回撤</p>
+            </div>
+            <div class="strategy-asof" id="strategyAsOf">--</div>
+          </div>
+
+          <div class="strategy-risk-banner" id="strategyRiskNotice">
+            只有通过样本、交易成本、基准超额和回撤门槛的策略，才会进入可执行区。
+          </div>
+
+          <div class="strategy-cards" id="strategyCards" aria-label="策略列表">
+            <div class="strategy-loading">正在计算策略状态…</div>
+          </div>
+
+          <section class="strategy-detail" id="strategyDetail" hidden>
+            <div class="strategy-detail-head">
+              <div>
+                <div class="strategy-title-row">
+                  <h3 id="strategyDetailTitle">--</h3>
+                  <span class="strategy-status" id="strategyDetailStatus">--</span>
+                </div>
+                <p id="strategyThesis">--</p>
+                <p class="strategy-evidence" id="strategyEvidence">--</p>
+              </div>
+            </div>
+
+            <div class="strategy-metrics" id="strategyMetrics"></div>
+
+            <div class="strategy-analysis-grid">
+              <div class="strategy-chart-card">
+                <div class="chart-head">
+                  <strong>历史净值与回撤</strong>
+                  <div class="strategy-curve-head-actions">
+                    <div class="strategy-curve-toggle" aria-label="回撤口径">
+                      <button type="button" id="strategyWalkForwardMode" class="active">滚动样本外</button>
+                      <button type="button" id="strategyFullSampleMode">全量参考</button>
+                    </div>
+                    <span id="strategyCurveMeta">--</span>
+                  </div>
+                </div>
+                <div class="strategy-chart-wrap">
+                  <svg id="strategyCurve" viewBox="0 0 760 300" role="img" aria-label="策略历史净值与回撤曲线"></svg>
+                </div>
+                <p class="strategy-method" id="strategyCurveMethod">--</p>
+              </div>
+
+              <aside class="strategy-rules" id="strategyRules" aria-label="策略执行规则"></aside>
+            </div>
+
+            <div class="strategy-recommendations">
+              <div class="strategy-recommendation-head">
+                <div>
+                  <h3 id="strategyRecommendationTitle">今日候选</h3>
+                  <p id="strategyRecommendationNote">--</p>
+                </div>
+                <span id="strategyRecommendationCount">--</span>
+              </div>
+              <div class="strategy-table-wrap" id="strategyTableWrap">
+                <table class="strategy-table">
+                  <thead>
+                    <tr>
+                      <th>排名</th>
+                      <th>股票</th>
+                      <th>动作</th>
+                      <th>行业</th>
+                      <th>收盘</th>
+                      <th>当日涨幅</th>
+                      <th>成交额</th>
+                      <th>入选依据</th>
+                    </tr>
+                  </thead>
+                  <tbody id="strategyRecommendationBody"></tbody>
+                </table>
+              </div>
+              <div class="strategy-empty" id="strategyRecommendationEmpty" hidden>当前没有符合门槛的股票</div>
+            </div>
+          </section>
+
+          <div class="strategy-error" id="strategyError" hidden></div>
         </section>
       </div>
 
@@ -264,6 +401,6 @@
       </div>
     </main>
 
-    <script src="app.js?v=concept-limit-up-1" defer></script>
+    <script src="app.js?v=strategy-status-guide-1" defer></script>
   </body>
 </html>

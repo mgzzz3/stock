@@ -111,6 +111,31 @@ CREATE TABLE IF NOT EXISTS concept_member_history (
 
 CREATE INDEX IF NOT EXISTS idx_concept_member_date_concept
     ON concept_member_history(trade_date, concept_code, member_rank);
+
+CREATE TABLE IF NOT EXISTS fundamental_annual (
+    ts_code          TEXT NOT NULL,
+    report_date      TEXT NOT NULL,
+    announcement_date TEXT NOT NULL,
+    name             TEXT,
+    industry         TEXT,
+    revenue          REAL,
+    revenue_yoy      REAL,
+    net_profit       REAL,
+    net_profit_yoy   REAL,
+    eps              REAL,
+    book_value_per_share REAL,
+    roe              REAL,
+    ocf_per_share    REAL,
+    gross_margin     REAL,
+    debt_to_assets   REAL,
+    source           TEXT NOT NULL,
+    fetched_at       TEXT NOT NULL,
+    PRIMARY KEY (ts_code, report_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fundamental_annual_code_announcement
+    ON fundamental_annual(ts_code, announcement_date);
+
 """
 
 

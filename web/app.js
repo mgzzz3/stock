@@ -13,12 +13,15 @@ const state = {
   dateDataDate: null,
   selectedIndustry: null,
   listFilter: "all",
-  activeTab: "mainline",  // "mainline" | "b1"
+  activeTab: "mainline",  // "mainline" | "b1" | "strategy"
   stockListSource: "b1",  // "b1" | "mainline"
   mainlineData: null,
   conceptData: null,
   focusStocks: [],
   detailReturnTarget: null,
+  strategyData: null,
+  activeStrategyId: null,
+  strategyCurveMode: "walk_forward",
 };
 
 const els = {
@@ -83,12 +86,38 @@ const els = {
   /* Tabs */
   viewTabs: document.querySelector("#viewTabs"),
   tabMainline: document.querySelector("#tabMainline"),
+  tabStrategy: document.querySelector("#tabStrategy"),
   stockWorkspace: document.querySelector("#stockWorkspace"),
+  /* Strategy decision dashboard */
+  strategySubtitle: document.querySelector("#strategySubtitle"),
+  strategyAsOf: document.querySelector("#strategyAsOf"),
+  strategyRiskNotice: document.querySelector("#strategyRiskNotice"),
+  strategyCards: document.querySelector("#strategyCards"),
+  strategyDetail: document.querySelector("#strategyDetail"),
+  strategyDetailTitle: document.querySelector("#strategyDetailTitle"),
+  strategyDetailStatus: document.querySelector("#strategyDetailStatus"),
+  strategyThesis: document.querySelector("#strategyThesis"),
+  strategyEvidence: document.querySelector("#strategyEvidence"),
+  strategyMetrics: document.querySelector("#strategyMetrics"),
+  strategyCurve: document.querySelector("#strategyCurve"),
+  strategyCurveMeta: document.querySelector("#strategyCurveMeta"),
+  strategyCurveMethod: document.querySelector("#strategyCurveMethod"),
+  strategyWalkForwardMode: document.querySelector("#strategyWalkForwardMode"),
+  strategyFullSampleMode: document.querySelector("#strategyFullSampleMode"),
+  strategyRules: document.querySelector("#strategyRules"),
+  strategyRecommendationTitle: document.querySelector("#strategyRecommendationTitle"),
+  strategyRecommendationNote: document.querySelector("#strategyRecommendationNote"),
+  strategyRecommendationCount: document.querySelector("#strategyRecommendationCount"),
+  strategyRecommendationBody: document.querySelector("#strategyRecommendationBody"),
+  strategyTableWrap: document.querySelector("#strategyTableWrap"),
+  strategyRecommendationEmpty: document.querySelector("#strategyRecommendationEmpty"),
+  strategyError: document.querySelector("#strategyError"),
 };
 
 function syncTabPanels() {
   const showMainlineStockList = state.activeTab === "mainline" && state.stockListSource === "mainline";
   els.tabMainline.hidden = state.activeTab !== "mainline" || showMainlineStockList;
+  els.tabStrategy.hidden = state.activeTab !== "strategy";
   els.stockWorkspace.hidden = state.activeTab !== "b1" && !showMainlineStockList;
 }
 
@@ -1916,6 +1945,297 @@ async function loadMainLine(date) {
   }
 }
 
+/* ── Strategy Decision Dashboard ── */
+
+function strategyMetricValue(value, suffix = "") {
+  if (value == null || Number.isNaN(Number(value))) return "--";
+  const number = Number(value);
+  const sign = number > 0 && suffix === "%" ? "+" : "";
+  return `${sign}${number.toFixed(suffix === "%" ? 2 : 0)}${suffix}`;
+}
+
+function renderStrategyCards(strategies) {
+  els.strategyCards.innerHTML = "";
+  for (const strategy of strategies) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `strategy-card status-${strategy.status}`;
+    button.classList.toggle("active", strategy.id === state.activeStrategyId);
+    button.setAttribute("aria-pressed", String(strategy.id === state.activeStrategyId));
+    button.addEventListener("click", () => {
+      state.activeStrategyId = strategy.id;
+      renderStrategyCards(strategies);
+      renderStrategyDetail(strategy);
+    });
+
+    const head = document.createElement("div");
+    head.className = "strategy-card-head";
+    const name = document.createElement("strong");
+    name.textContent = strategy.short_name || strategy.name;
+    const status = document.createElement("span");
+    status.className = `strategy-status status-${strategy.status}`;
+    status.textContent = strategy.status_label || strategy.status;
+    head.append(name, status);
+
+    const thesis = document.createElement("p");
+    thesis.textContent = strategy.thesis || "--";
+
+    const metrics = document.createElement("div");
+    metrics.className = "strategy-card-metrics";
+    const walkForwardMetrics = strategy.walk_forward?.metrics || {};
+    const metricRows = [
+      ["净单笔", strategyMetricValue(strategy.metrics?.net_mean_return_pct, "%")],
+      ["基准超额", strategyMetricValue(strategy.metrics?.excess_return_pct, "%")],
+      ["滚动回撤", strategyMetricValue(walkForwardMetrics.max_drawdown_pct, "%")],
+    ];
+    for (const [label, value] of metricRows) {
+      const item = document.createElement("span");
+      const labelNode = document.createElement("small");
+      labelNode.textContent = label;
+      const valueNode = document.createElement("b");
+      valueNode.textContent = value;
+      item.append(labelNode, valueNode);
+      metrics.append(item);
+    }
+    button.append(head, thesis, metrics);
+    els.strategyCards.append(button);
+  }
+}
+
+function renderStrategyMetrics(strategy) {
+  const metrics = strategy.metrics || {};
+  const walkForward = strategy.walk_forward?.metrics || {};
+  els.strategyMetrics.innerHTML = "";
+  const items = [
+    ["滚动最大回撤", strategyMetricValue(walkForward.max_drawdown_pct, "%"), "样本外逐日净值"],
+    ["滚动总收益", strategyMetricValue(walkForward.total_return_pct, "%"), `净值 ${walkForward.latest_nav ?? "--"}`],
+    ["启用窗口", `${walkForward.enabled_windows ?? 0}/${walkForward.total_windows ?? 0}`, walkForward.latest_approved ? "最近窗口通过" : "最近窗口未通过"],
+    ["样本外信号", walkForward.oos_signal_count == null ? "--" : Number(walkForward.oos_signal_count).toLocaleString("zh-CN"), "仅统计门控通过窗口"],
+    ["全量净单笔", strategyMetricValue(metrics.net_mean_return_pct, "%"), "仅作训练参考"],
+    ["全量基准超额", strategyMetricValue(metrics.excess_return_pct, "%"), "仅作训练参考"],
+  ];
+  for (const [label, value, note] of items) {
+    const card = document.createElement("div");
+    card.className = "strategy-metric";
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+    const valueNode = document.createElement("strong");
+    valueNode.textContent = value;
+    const noteNode = document.createElement("small");
+    noteNode.textContent = note;
+    card.append(labelNode, valueNode, noteNode);
+    els.strategyMetrics.append(card);
+  }
+}
+
+function renderStrategyCurve(strategy) {
+  const useWalkForward = state.strategyCurveMode === "walk_forward";
+  const walkForward = strategy.walk_forward || {};
+  const points = useWalkForward
+    ? (Array.isArray(walkForward.curve) ? walkForward.curve : [])
+    : (Array.isArray(strategy.curve) ? strategy.curve : []);
+  const curveMetrics = useWalkForward ? (walkForward.metrics || {}) : (strategy.metrics || {});
+  els.strategyWalkForwardMode.classList.toggle("active", useWalkForward);
+  els.strategyFullSampleMode.classList.toggle("active", !useWalkForward);
+  els.strategyWalkForwardMode.setAttribute("aria-pressed", String(useWalkForward));
+  els.strategyFullSampleMode.setAttribute("aria-pressed", String(!useWalkForward));
+  els.strategyCurve.innerHTML = "";
+  els.strategyCurveMethod.textContent = useWalkForward
+    ? (walkForward.curve_method || "暂无滚动回测说明")
+    : (strategy.curve_method || "--");
+  if (points.length < 2) {
+    const empty = svgNode("text", { x: 380, y: 150, "text-anchor": "middle", class: "strategy-chart-label" });
+    empty.textContent = "历史数据不足";
+    els.strategyCurve.append(empty);
+    els.strategyCurveMeta.textContent = "暂无曲线";
+    return;
+  }
+
+  const width = 760;
+  const left = 48;
+  const right = 16;
+  const navTop = 18;
+  const navBottom = 200;
+  const drawdownTop = 226;
+  const drawdownBottom = 274;
+  const plotWidth = width - left - right;
+  const navValues = points.map((point) => Number(point.nav)).filter(Number.isFinite);
+  const drawdownValues = points.map((point) => Number(point.drawdown_pct)).filter(Number.isFinite);
+  let navMin = Math.min(...navValues);
+  let navMax = Math.max(...navValues);
+  if (navMin === navMax) {
+    navMin *= 0.98;
+    navMax *= 1.02;
+  }
+  const drawdownMin = Math.min(...drawdownValues, -0.01);
+  const xFor = (index) => left + (index / (points.length - 1)) * plotWidth;
+  const navY = (value) => navBottom - ((value - navMin) / (navMax - navMin)) * (navBottom - navTop);
+  const drawdownY = (value) => drawdownTop + (value / drawdownMin) * (drawdownBottom - drawdownTop);
+
+  for (const y of [navTop, (navTop + navBottom) / 2, navBottom, drawdownTop, drawdownBottom]) {
+    els.strategyCurve.append(svgNode("line", { x1: left, y1: y, x2: width - right, y2: y, class: "strategy-chart-grid" }));
+  }
+
+  const drawdownPolygon = [
+    `${left},${drawdownTop}`,
+    ...points.map((point, index) => `${xFor(index)},${drawdownY(Number(point.drawdown_pct))}`),
+    `${width - right},${drawdownTop}`,
+  ].join(" ");
+  els.strategyCurve.append(svgNode("polygon", { points: drawdownPolygon, class: "strategy-drawdown-area" }));
+  const drawdownLine = points.map((point, index) => `${xFor(index)},${drawdownY(Number(point.drawdown_pct))}`).join(" ");
+  els.strategyCurve.append(svgNode("polyline", { points: drawdownLine, class: "strategy-drawdown-line" }));
+  const navLine = points.map((point, index) => `${xFor(index)},${navY(Number(point.nav))}`).join(" ");
+  els.strategyCurve.append(svgNode("polyline", { points: navLine, class: "strategy-nav-line" }));
+
+  const labels = [
+    [left - 6, navTop + 4, navMax.toFixed(2), "end"],
+    [left - 6, navBottom, navMin.toFixed(2), "end"],
+    [left - 6, drawdownTop + 4, "0%", "end"],
+    [left - 6, drawdownBottom, `${drawdownMin.toFixed(1)}%`, "end"],
+    [left, 296, displayDate(points[0].date), "start"],
+    [width - right, 296, displayDate(points[points.length - 1].date), "end"],
+  ];
+  for (const [x, y, value, anchor] of labels) {
+    const label = svgNode("text", { x, y, "text-anchor": anchor, class: "strategy-chart-label" });
+    label.textContent = value;
+    els.strategyCurve.append(label);
+  }
+
+  const maxDrawdown = curveMetrics.max_drawdown_pct;
+  const prefix = useWalkForward ? "样本外" : "全量";
+  els.strategyCurveMeta.textContent = `${prefix} ${points.length} 日 · 最大回撤 ${strategyMetricValue(maxDrawdown, "%")}`;
+}
+
+function renderStrategyRules(strategy) {
+  els.strategyRules.innerHTML = "";
+  const title = document.createElement("h4");
+  title.textContent = "执行纪律";
+  els.strategyRules.append(title);
+  const latestWindow = strategy.walk_forward?.latest_window;
+  const gateSummary = latestWindow
+    ? `${displayDate(latestWindow.training_start)}—${displayDate(latestWindow.training_end)}：净单笔 ${strategyMetricValue(latestWindow.training_net_mean_return_pct, "%")}、超额 ${strategyMetricValue(latestWindow.training_excess_return_pct, "%")}、胜率 ${strategyMetricValue(latestWindow.training_win_rate_pct, "%")}，${latestWindow.approved ? "门控通过" : "门控未通过"}`
+    : "滚动训练数据不足";
+  const rules = [
+    ["滚动", gateSummary],
+    ["买入", strategy.signal_rule],
+    ["退出", strategy.exit_rule],
+    ["仓位", strategy.position_rule],
+  ];
+  const frozenHoldout = strategy.research_split?.frozen_holdout;
+  if (frozenHoldout) {
+    rules.splice(1, 0, [
+      "冻结留出",
+      `${frozenHoldout.cohort_count ?? 0} 个完整组合：净单笔 ${strategyMetricValue(frozenHoldout.net_mean_return_pct, "%")}、净值 ${frozenHoldout.latest_nav ?? "--"}、最大回撤 ${strategyMetricValue(frozenHoldout.max_drawdown_pct, "%")}`,
+    ]);
+  }
+  if (Array.isArray(strategy.known_limitations) && strategy.known_limitations.length) {
+    rules.push(["限制", strategy.known_limitations.join("；")]);
+  }
+  for (const [label, value] of rules) {
+    const item = document.createElement("div");
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+    const valueNode = document.createElement("p");
+    valueNode.textContent = value || "--";
+    item.append(labelNode, valueNode);
+    els.strategyRules.append(item);
+  }
+}
+
+function renderStrategyRecommendations(strategy) {
+  const rows = Array.isArray(strategy.recommendations) ? strategy.recommendations : [];
+  const signalLabel = strategy.current_signal_label || "原始信号";
+  els.strategyRecommendationTitle.textContent = strategy.recommendation_label || "今日候选";
+  els.strategyRecommendationNote.textContent = strategy.recommendation_note || "--";
+  els.strategyRecommendationCount.textContent = `${rows.length} 只 · ${signalLabel} ${Number(strategy.current_signal_count || 0).toLocaleString("zh-CN")} 只`;
+  els.strategyRecommendationBody.innerHTML = "";
+  els.strategyTableWrap.hidden = rows.length === 0;
+  els.strategyRecommendationEmpty.hidden = rows.length > 0;
+  els.strategyRecommendationEmpty.textContent = strategy.recommendation_note || "当前没有符合门槛的股票";
+
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    const values = [
+      row.rank,
+      null,
+      null,
+      row.industry || "--",
+      row.close == null ? "--" : Number(row.close).toFixed(2),
+      row.pct_chg == null ? "--" : `${Number(row.pct_chg) > 0 ? "+" : ""}${Number(row.pct_chg).toFixed(2)}%`,
+      row.amount_billion == null ? "--" : `${Number(row.amount_billion).toFixed(1)} 亿`,
+      (row.reasons || []).join(" · "),
+    ];
+    values.forEach((value, index) => {
+      const td = document.createElement("td");
+      if (index === 1) {
+        const name = document.createElement("strong");
+        name.textContent = row.name || row.ts_code;
+        const code = document.createElement("small");
+        code.textContent = row.ts_code || "--";
+        td.className = "strategy-stock-cell";
+        td.append(name, code);
+      } else if (index === 2) {
+        const action = document.createElement("span");
+        action.className = `strategy-action ${strategy.status === "active" ? "action-buy" : "action-watch"}`;
+        action.textContent = row.action || (strategy.status === "active" ? "候选买入" : "仅观察");
+        action.title = row.trigger || "";
+        td.append(action);
+      } else {
+        td.textContent = String(value ?? "--");
+      }
+      if (index === 5) td.className = Number(row.pct_chg) >= 0 ? "return-up" : "return-down";
+      if (index === 7) td.className = "strategy-reasons-cell";
+      tr.append(td);
+    });
+    els.strategyRecommendationBody.append(tr);
+  }
+}
+
+function renderStrategyDetail(strategy) {
+  els.strategyDetail.hidden = false;
+  els.strategyError.hidden = true;
+  els.strategyDetailTitle.textContent = strategy.name || "--";
+  els.strategyDetailStatus.textContent = `${strategy.status_label || strategy.status} · 置信度 ${strategy.confidence || "--"}`;
+  els.strategyDetailStatus.className = `strategy-status status-${strategy.status}`;
+  els.strategyThesis.textContent = strategy.thesis || "--";
+  els.strategyEvidence.textContent = strategy.evidence || "--";
+  renderStrategyMetrics(strategy);
+  renderStrategyCurve(strategy);
+  renderStrategyRules(strategy);
+  renderStrategyRecommendations(strategy);
+}
+
+function renderStrategies(payload) {
+  const strategies = Array.isArray(payload.strategies) ? payload.strategies : [];
+  if (!strategies.length) throw new Error("暂无策略回测数据");
+  state.strategyData = payload;
+  if (!state.activeStrategyId || !strategies.some((item) => item.id === state.activeStrategyId)) {
+    state.activeStrategyId = strategies.find((item) => item.status === "active")?.id || strategies[0].id;
+  }
+  els.strategySubtitle.textContent = `${strategies.length} 个策略 · ${payload.summary?.active_strategy_count || 0} 个条件执行 · ${payload.summary?.active_recommendation_count || 0} 只候选`;
+  els.strategyAsOf.textContent = `数据截至 ${displayDate(payload.as_of_date)}`;
+  els.strategyRiskNotice.textContent = payload.risk_notice || els.strategyRiskNotice.textContent;
+  renderStrategyCards(strategies);
+  renderStrategyDetail(strategies.find((item) => item.id === state.activeStrategyId) || strategies[0]);
+}
+
+async function loadStrategies() {
+  els.strategyError.hidden = true;
+  if (state.strategyData) {
+    renderStrategies(state.strategyData);
+    return;
+  }
+  try {
+    const path = state.manifest?.strategies || "data/strategies.json";
+    renderStrategies(await fetchJson(path));
+  } catch (error) {
+    els.strategyCards.innerHTML = "";
+    els.strategyDetail.hidden = true;
+    els.strategyError.hidden = false;
+    els.strategyError.textContent = error.message || "策略数据读取失败";
+  }
+}
+
 /* ── Tab Switching ── */
 
 function switchTab(tabName, options = {}) {
@@ -1932,12 +2252,15 @@ function switchTab(tabName, options = {}) {
 
   // Show/hide tab content
   syncTabPanels();
+  els.dateTabs.hidden = tabName === "strategy";
 
   // Update subtitle
   if (tabName === "mainline") {
     els.subtitle.textContent = `主线监控 · ${displayDate(state.selectedDate)}`;
-  } else {
+  } else if (tabName === "b1") {
     els.subtitle.textContent = `B1 信号 · ${displayDate(state.selectedDate)}`;
+  } else {
+    els.subtitle.textContent = `策略决策 · ${displayDate(state.manifest?.latest_date || state.selectedDate)}`;
   }
 
   // Reload content for current date
@@ -1947,6 +2270,8 @@ function switchTab(tabName, options = {}) {
     state.stockListSource = "b1";
     syncTabPanels();
     loadMainLine(state.selectedDate);
+  } else if (tabName === "strategy") {
+    loadStrategies();
   } else if (state.dateDataDate !== state.selectedDate) {
     loadDate(state.selectedDate);
   } else if (previousStockListSource !== "b1" || state.mode === "industry") {
@@ -2015,6 +2340,15 @@ async function init() {
 document.querySelectorAll(".view-tab").forEach((btn) => {
   btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 });
+
+function setStrategyCurveMode(mode) {
+  state.strategyCurveMode = mode === "full_sample" ? "full_sample" : "walk_forward";
+  const strategy = state.strategyData?.strategies?.find((item) => item.id === state.activeStrategyId);
+  if (strategy) renderStrategyCurve(strategy);
+}
+
+els.strategyWalkForwardMode.addEventListener("click", () => setStrategyCurveMode("walk_forward"));
+els.strategyFullSampleMode.addEventListener("click", () => setStrategyCurveMode("full_sample"));
 
 els.predictionOnly.addEventListener("click", () => applyListFilter("predictions"));
 els.showAllStocks.addEventListener("click", () => applyListFilter("all"));

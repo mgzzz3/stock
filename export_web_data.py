@@ -8,6 +8,7 @@ The generated files live under web/data/ and can be served by GitHub Pages:
     web/data/dates/<YYYYMMDD>.json
     web/data/search_index.json
     web/data/industry_trends.json
+    web/data/strategies.json
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from pathlib import Path
 import pandas as pd
 
 from search_stock_csv import order_columns, read_csv, relative_path
+from strategy.dashboard import build_strategy_dashboard
 
 
 ROOT = Path(__file__).resolve().parent
@@ -967,6 +969,11 @@ def export_static_data(
         output_dir / "industry_trends.json",
         build_industry_trends(daily_industry_counts, generated_at),
     )
+    strategy_payload = build_strategy_dashboard(
+        db_path,
+        date_entries[0]["date"] if date_entries else None,
+    )
+    write_json(output_dir / "strategies.json", strategy_payload)
 
     manifest = {
         "generated_at": generated_at,
@@ -974,6 +981,7 @@ def export_static_data(
         "dates": date_entries,
         "search_index": "data/search_index.json",
         "industry_trends": "data/industry_trends.json",
+        "strategies": "data/strategies.json",
         "mainline": "data/main_line.json" if mainline_index else None,
         "mainline_index": mainline_index,
         "concept_ranking": "data/concept_ranking.json" if concept_index else None,
@@ -993,6 +1001,7 @@ def main() -> int:
     print(f"Exported static web data to: {args.output_dir}")
     print(f"Dates: {len(manifest['dates'])}; latest: {manifest['latest_date']}")
     print(f"K-line files: {manifest['kline_count']}; limit: {manifest['kline_limit']}")
+    print(f"Strategies: {manifest['strategies']}")
     return 0
 
 
