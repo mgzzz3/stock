@@ -20,6 +20,7 @@ const state = {
   focusStocks: [],
   detailReturnTarget: null,
   detailCase: null,
+  klineView: null,
   strategyData: null,
   activeStrategyId: null,
   strategyCurveMode: "walk_forward",
@@ -61,6 +62,10 @@ const els = {
   klineHoverOpen: document.querySelector("#klineHoverOpen"),
   klineHoverClose: document.querySelector("#klineHoverClose"),
   klineHoverChange: document.querySelector("#klineHoverChange"),
+  klineZoomStatus: document.querySelector("#klineZoomStatus"),
+  klineZoomOut: document.querySelector("#klineZoomOut"),
+  klineZoomReset: document.querySelector("#klineZoomReset"),
+  klineZoomIn: document.querySelector("#klineZoomIn"),
   detailReturns: document.querySelector("#detailReturns"),
   detailReturnTitle: document.querySelector("#detailReturnTitle"),
   detailReturnNote: document.querySelector("#detailReturnNote"),
@@ -795,9 +800,110 @@ function renderCachedDateData() {
   });
 }
 
+const KLINE_MIN_VISIBLE_DAYS = 20;
+
+function maxKlineZoomLevel(total, minimumVisible = KLINE_MIN_VISIBLE_DAYS) {
+  let level = 0;
+  while (Math.ceil(total / (2 ** level)) > minimumVisible) {
+    level += 1;
+  }
+  return level;
+}
+
+function klineVisibleCount(total, zoomLevel, minimumVisible = KLINE_MIN_VISIBLE_DAYS) {
+  if (!total) return 0;
+  return Math.min(total, Math.max(minimumVisible, Math.ceil(total / (2 ** zoomLevel))));
+}
+
+function klineCaseIndexes(view) {
+  if (!view?.strategyCase) return [];
+  const dates = view.kline.map((item) => String(item.trade_date || ""));
+  return [
+    view.strategyCase.signal_date,
+    view.strategyCase.entry_date,
+    view.strategyCase.exit_date,
+  ]
+    .map((date) => dates.indexOf(String(date || "")))
+    .filter((index) => index >= 0);
+}
+
+function minimumKlineVisibleDays(view) {
+  const indexes = klineCaseIndexes(view);
+  if (indexes.length < 2) return KLINE_MIN_VISIBLE_DAYS;
+  const caseSpan = Math.max(...indexes) - Math.min(...indexes) + 1;
+  return Math.min(view.kline.length, Math.max(KLINE_MIN_VISIBLE_DAYS, caseSpan + 10));
+}
+
+function klineViewWindow(view) {
+  const minimumVisible = minimumKlineVisibleDays(view);
+  const visible = klineVisibleCount(view.kline.length, view.zoomLevel, minimumVisible);
+  const caseIndexes = klineCaseIndexes(view);
+  if (caseIndexes.length < 2) {
+    return { visible, start: Math.max(0, view.kline.length - visible), minimumVisible };
+  }
+  const caseCenter = (Math.min(...caseIndexes) + Math.max(...caseIndexes)) / 2;
+  const start = Math.max(0, Math.min(
+    view.kline.length - visible,
+    Math.round(caseCenter - (visible - 1) / 2),
+  ));
+  return { visible, start, minimumVisible };
+}
+
+function updateKlineZoomControls() {
+  const view = state.klineView;
+  const total = view?.kline?.length || 0;
+  const level = view?.zoomLevel || 0;
+  const minimumVisible = view ? minimumKlineVisibleDays(view) : KLINE_MIN_VISIBLE_DAYS;
+  const visible = klineVisibleCount(total, level, minimumVisible);
+  const maxLevel = maxKlineZoomLevel(total, minimumVisible);
+
+  els.klineZoomOut.disabled = !total || level === 0;
+  els.klineZoomReset.disabled = !total || level === 0;
+  els.klineZoomIn.disabled = !total || level >= maxLevel;
+  const zoomRatio = visible ? total / visible : 1;
+  const zoomLabel = zoomRatio <= 1
+    ? "全部"
+    : `${zoomRatio.toFixed(zoomRatio >= 10 ? 0 : 1)} 倍`;
+  els.klineZoomStatus.textContent = total
+    ? `显示 ${visible} / ${total} 个交易日 · ${zoomLabel}`
+    : "等待日线数据";
+}
+
+function renderKlineView() {
+  const view = state.klineView;
+  if (!view) {
+    updateKlineZoomControls();
+    return;
+  }
+  const window = klineViewWindow(view);
+  renderKlineChart(
+    view.kline,
+    view.stockLabel,
+    view.signalDates,
+    view.strategyCase,
+    window.start,
+    window.visible,
+  );
+  updateKlineZoomControls();
+}
+
+function setKlineZoom(nextLevel) {
+  const view = state.klineView;
+  if (!view) return;
+  const maxLevel = maxKlineZoomLevel(view.kline.length, minimumKlineVisibleDays(view));
+  view.zoomLevel = Math.max(0, Math.min(maxLevel, nextLevel));
+  renderKlineView();
+}
+
+els.klineZoomOut.addEventListener("click", () => setKlineZoom((state.klineView?.zoomLevel || 0) - 1));
+els.klineZoomReset.addEventListener("click", () => setKlineZoom(0));
+els.klineZoomIn.addEventListener("click", () => setKlineZoom((state.klineView?.zoomLevel || 0) + 1));
+
 function showStockDetail(tsCode, name, options = {}) {
   state.detailReturnTarget = options.returnTarget || null;
   state.detailCase = options.strategyCase || null;
+  state.klineView = null;
+  updateKlineZoomControls();
   syncTabPanels();
   els.listPanel.hidden = true;
   els.industryPanel.hidden = true;
@@ -830,12 +936,14 @@ function showStockDetail(tsCode, name, options = {}) {
       els.detailMeta.textContent = state.detailCase
         ? `${data.count} 个交易日 · 信号 ${displayDate(state.detailCase.signal_date)} · 扣费收益 ${strategyMetricValue(state.detailCase.net_return_pct, "%")}`
         : `${data.count} 个交易日${signalCount ? ` · ${signalCount} 个B标记` : ""}`;
-      renderKlineChart(
-        data.kline,
-        data.name || tsCode,
-        state.detailCase ? [] : signalDates,
-        state.detailCase,
-      );
+      state.klineView = {
+        kline: data.kline || [],
+        stockLabel: data.name || tsCode,
+        signalDates: state.detailCase ? [] : signalDates,
+        strategyCase: state.detailCase,
+        zoomLevel: 0,
+      };
+      renderKlineView();
       if (state.detailCase) {
         renderStrategyCaseSummary(state.detailCase);
       } else {
@@ -990,7 +1098,7 @@ function renderStrategyCaseSummary(strategyCase) {
   els.detailReturns.append(reasons);
 }
 
-function renderKlineChart(kline, stockLabel, signalDates = [], strategyCase = null) {
+function renderKlineChart(kline, stockLabel, signalDates = [], strategyCase = null, viewStart = 0, viewCount = null) {
   const svg = els.klineChart;
   svg.innerHTML = "";
 
@@ -1001,6 +1109,12 @@ function renderKlineChart(kline, stockLabel, signalDates = [], strategyCase = nu
     svg.append(t);
     return;
   }
+
+  const fullKline = kline;
+  const safeViewStart = Math.max(0, Math.min(fullKline.length - 2, Number(viewStart) || 0));
+  const requestedCount = Number(viewCount) || (fullKline.length - safeViewStart);
+  const safeViewCount = Math.max(2, Math.min(fullKline.length - safeViewStart, requestedCount));
+  kline = fullKline.slice(safeViewStart, safeViewStart + safeViewCount);
 
   const width = 800;
   const height = 400;
@@ -1013,6 +1127,7 @@ function renderKlineChart(kline, stockLabel, signalDates = [], strategyCase = nu
   const highs = kline.map((d) => Number(d.high));
   const lows = kline.map((d) => Number(d.low));
   const closes = kline.map((d) => Number(d.close));
+  const fullCloses = fullKline.map((d) => Number(d.close));
   const volumes = kline.map((d) => Number(d.vol || 0));
   const dates = kline.map((d) => d.trade_date || "");
 
@@ -1084,9 +1199,9 @@ function renderKlineChart(kline, stockLabel, signalDates = [], strategyCase = nu
     svg.append(svgNode("path", { d, class: className }));
   }
 
-  const ma5 = ma(closes, 5);
-  const ma10 = ma(closes, 10);
-  const ma20 = ma(closes, 20);
+  const ma5 = ma(fullCloses, 5).slice(safeViewStart, safeViewStart + safeViewCount);
+  const ma10 = ma(fullCloses, 10).slice(safeViewStart, safeViewStart + safeViewCount);
+  const ma20 = ma(fullCloses, 20).slice(safeViewStart, safeViewStart + safeViewCount);
   renderMA(ma5, "kline-ma5");
   renderMA(ma10, "kline-ma10");
   renderMA(ma20, "kline-ma20");

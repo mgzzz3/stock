@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A 股信号浏览</title>
-    <link rel="stylesheet" href="styles.css?v=strategy-history-cases-1" />
+    <link rel="stylesheet" href="styles.css?v=kline-zoom-3" />
   </head>
   <body>
     <main class="shell">
@@ -422,6 +422,17 @@
           </div>
           <div class="detail-body">
             <div class="detail-chart-wrap">
+              <div class="kline-toolbar">
+                <div class="kline-toolbar-label">
+                  <strong>日线图</strong>
+                  <span id="klineZoomStatus" aria-live="polite">--</span>
+                </div>
+                <div class="kline-zoom-controls" role="group" aria-label="日线图缩放">
+                  <button id="klineZoomOut" type="button" title="缩小，显示更多交易日" aria-label="缩小日线图">−</button>
+                  <button id="klineZoomReset" type="button" title="恢复全部交易日">重置</button>
+                  <button id="klineZoomIn" type="button" title="放大，显示更少交易日" aria-label="放大日线图">＋</button>
+                </div>
+              </div>
               <div class="kline-hover-info" id="klineHoverInfo" aria-live="polite">
                 <strong id="klineHoverDate">--</strong>
                 <span>开盘 <b id="klineHoverOpen">--</b></span>
@@ -442,6 +453,6 @@
       </div>
     </main>
 
-    <script src="app.js?v=strategy-history-cases-1" defer></script>
+    <script src="app.js?v=kline-zoom-3" defer></script>
   </body>
 </html>
