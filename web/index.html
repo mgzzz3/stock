@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A 股信号浏览</title>
-    <link rel="stylesheet" href="styles.css?v=strategy-status-guide-1" />
+    <link rel="stylesheet" href="styles.css?v=strategy-history-cases-1" />
   </head>
   <body>
     <main class="shell">
@@ -223,6 +223,18 @@
 
             <div class="strategy-metrics" id="strategyMetrics"></div>
 
+            <section class="strategy-credibility" aria-label="样本可信度审计">
+              <div class="strategy-subsection-head">
+                <div>
+                  <h3>样本可信度审计</h3>
+                  <p>信号数量不等于独立样本，优先看滚动样本外交易与有效窗口。</p>
+                </div>
+                <span id="strategyCredibilityLevel">--</span>
+              </div>
+              <div class="strategy-credibility-grid" id="strategyCredibilityGrid"></div>
+              <p class="strategy-credibility-note" id="strategyCredibilityNote">--</p>
+            </section>
+
             <div class="strategy-analysis-grid">
               <div class="strategy-chart-card">
                 <div class="chart-head">
@@ -271,6 +283,35 @@
               </div>
               <div class="strategy-empty" id="strategyRecommendationEmpty" hidden>当前没有符合门槛的股票</div>
             </div>
+
+            <section class="strategy-history" aria-label="策略历史交易案例">
+              <div class="strategy-subsection-head">
+                <div>
+                  <h3>历史交易案例</h3>
+                  <p id="strategyHistoryNote">最近已完成的盈利与亏损交易，点击股票查看日线。</p>
+                </div>
+                <span id="strategyHistoryCount">--</span>
+              </div>
+              <div class="strategy-table-wrap" id="strategyHistoryTableWrap">
+                <table class="strategy-table strategy-history-table">
+                  <thead>
+                    <tr>
+                      <th>结果</th>
+                      <th>证据</th>
+                      <th>股票</th>
+                      <th>信号日</th>
+                      <th>买入日</th>
+                      <th>退出日</th>
+                      <th>扣费收益</th>
+                      <th>退出方式</th>
+                      <th>信号理由</th>
+                    </tr>
+                  </thead>
+                  <tbody id="strategyHistoryBody"></tbody>
+                </table>
+              </div>
+              <div class="strategy-empty" id="strategyHistoryEmpty" hidden>暂无已完成历史案例</div>
+            </section>
           </section>
 
           <div class="strategy-error" id="strategyError" hidden></div>
@@ -389,9 +430,9 @@
               </div>
               <svg id="klineChart" viewBox="0 0 800 400" role="img" aria-label="日线K线图"></svg>
             </div>
-            <aside class="detail-return-panel" aria-label="B标记收益">
-              <div class="detail-return-title">B标记收益</div>
-              <div class="detail-return-note">近20个交易日内出现的B，按次日开盘买入计算至最新收盘。</div>
+            <aside class="detail-return-panel" aria-label="信号交易信息">
+              <div class="detail-return-title" id="detailReturnTitle">B标记收益</div>
+              <div class="detail-return-note" id="detailReturnNote">近20个交易日内出现的B，按次日开盘买入计算至最新收盘。</div>
               <div class="detail-return-list" id="detailReturns"></div>
             </aside>
           </div>
@@ -401,6 +442,6 @@
       </div>
     </main>
 
-    <script src="app.js?v=strategy-status-guide-1" defer></script>
+    <script src="app.js?v=strategy-history-cases-1" defer></script>
   </body>
 </html>

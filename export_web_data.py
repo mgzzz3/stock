@@ -62,6 +62,11 @@ def parse_args() -> argparse.Namespace:
         help="SQLite database used to export static K-line detail data.",
     )
     parser.add_argument("--kline-limit", default=120, type=int)
+    parser.add_argument(
+        "--strategies-only",
+        action="store_true",
+        help="Refresh strategies.json and strategy-linked K-lines without rebuilding all web data.",
+    )
     return parser.parse_args()
 
 
@@ -731,6 +736,9 @@ def export_kline_data(
     output_dir: Path,
     limit: int,
     generated_at: str,
+    *,
+    extended_ts_codes: set[str] | None = None,
+    extended_limit: int = 260,
 ) -> dict[str, str]:
     if not ts_codes or not db_path.exists():
         return {}
@@ -742,13 +750,14 @@ def export_kline_data(
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
         for ts_code in sorted(ts_codes):
+            row_limit = max(limit, extended_limit) if ts_code in (extended_ts_codes or set()) else limit
             rows = conn.execute(
                 """SELECT trade_date, open, high, low, close, pre_close, vol, amount
                    FROM daily
                    WHERE ts_code = ?
                    ORDER BY trade_date DESC
                    LIMIT ?""",
-                (ts_code, limit),
+                (ts_code, row_limit),
             ).fetchall()
             if not rows:
                 continue
@@ -780,6 +789,30 @@ def export_kline_data(
             kline_index[symbol] = paths[0]
 
     return kline_index
+
+
+def collect_strategy_codes(
+    strategy_payload: dict[str, object],
+    *,
+    cases_only: bool = False,
+) -> set[str]:
+    """Collect stock codes needed for clickable strategy rows."""
+    codes: set[str] = set()
+    for strategy in strategy_payload.get("strategies", []):
+        if not isinstance(strategy, dict):
+            continue
+        if not cases_only:
+            for row in strategy.get("recommendations", []):
+                if isinstance(row, dict) and row.get("ts_code"):
+                    codes.add(str(row["ts_code"]).strip().upper())
+        history = strategy.get("historical_cases", {})
+        if not isinstance(history, dict):
+            continue
+        for bucket in ("wins", "losses"):
+            for row in history.get(bucket, []):
+                if isinstance(row, dict) and row.get("ts_code"):
+                    codes.add(str(row["ts_code"]).strip().upper())
+    return codes
 
 
 def industry_counts(df: pd.DataFrame) -> dict[str, int]:
@@ -942,11 +975,18 @@ def export_static_data(
         else pd.DataFrame()
     )
     signal_dates = build_signal_dates(search_df, db_path)
+    strategy_payload = build_strategy_dashboard(
+        db_path,
+        date_entries[0]["date"] if date_entries else None,
+    )
+    strategy_codes = collect_strategy_codes(strategy_payload)
+    strategy_case_codes = collect_strategy_codes(strategy_payload, cases_only=True)
     mainline_index = export_mainline_data(db_path, output_dir, sorted(grouped))
     concept_index = export_concept_data(db_path, output_dir, sorted(grouped))
     export_codes = resolve_export_codes(collect_code_values(search_df), db_path)
     export_codes.update(collect_mainline_codes(db_path, sorted(grouped)))
     export_codes.update(collect_concept_codes(db_path, sorted(grouped)))
+    export_codes.update(strategy_codes)
     kline_index = export_kline_data(
         export_codes,
         signal_dates,
@@ -954,6 +994,7 @@ def export_static_data(
         output_dir,
         kline_limit,
         generated_at,
+        extended_ts_codes=strategy_case_codes,
     )
     search_payload = frame_payload(search_df)
     search_payload.update(
@@ -968,10 +1009,6 @@ def export_static_data(
     write_json(
         output_dir / "industry_trends.json",
         build_industry_trends(daily_industry_counts, generated_at),
-    )
-    strategy_payload = build_strategy_dashboard(
-        db_path,
-        date_entries[0]["date"] if date_entries else None,
     )
     write_json(output_dir / "strategies.json", strategy_payload)
 
@@ -995,8 +1032,56 @@ def export_static_data(
     return manifest
 
 
+def export_strategy_assets(
+    output_dir: Path,
+    db_path: Path = DEFAULT_DB_PATH,
+    kline_limit: int = 120,
+) -> dict[str, object]:
+    """Refresh strategy assets without rewriting unrelated generated files."""
+    output_dir = output_dir.resolve()
+    db_path = db_path.resolve()
+    manifest_path = output_dir / "manifest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError("manifest.json is missing; run a full web export first")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    strategy_payload = build_strategy_dashboard(db_path, manifest.get("latest_date"))
+    strategy_codes = collect_strategy_codes(strategy_payload)
+    strategy_case_codes = collect_strategy_codes(strategy_payload, cases_only=True)
+    signal_dates = dict(manifest.get("signal_dates") or {})
+    strategy_kline_index = export_kline_data(
+        strategy_codes,
+        signal_dates,
+        db_path,
+        output_dir,
+        kline_limit,
+        generated_at,
+        extended_ts_codes=strategy_case_codes,
+    )
+    kline_index = dict(manifest.get("kline_index") or {})
+    kline_index.update(strategy_kline_index)
+    manifest.update(
+        {
+            "generated_at": generated_at,
+            "strategies": "data/strategies.json",
+            "kline_index": kline_index,
+            "kline_count": len({
+                path for key, path in kline_index.items() if "." in key
+            }),
+        }
+    )
+    write_json(output_dir / "strategies.json", strategy_payload)
+    write_json(manifest_path, manifest)
+    return manifest
+
+
 def main() -> int:
     args = parse_args()
+    if args.strategies_only:
+        manifest = export_strategy_assets(args.output_dir, args.db_path, args.kline_limit)
+        print(f"Strategies refreshed: {manifest['strategies']}")
+        print(f"K-line files indexed: {manifest['kline_count']}")
+        return 0
     manifest = export_static_data(args.data_dir, args.output_dir, args.db_path, args.kline_limit)
     print(f"Exported static web data to: {args.output_dir}")
     print(f"Dates: {len(manifest['dates'])}; latest: {manifest['latest_date']}")

@@ -14,11 +14,12 @@ const state = {
   selectedIndustry: null,
   listFilter: "all",
   activeTab: "mainline",  // "mainline" | "b1" | "strategy"
-  stockListSource: "b1",  // "b1" | "mainline"
+  stockListSource: "b1",  // "b1" | "mainline" | "strategy"
   mainlineData: null,
   conceptData: null,
   focusStocks: [],
   detailReturnTarget: null,
+  detailCase: null,
   strategyData: null,
   activeStrategyId: null,
   strategyCurveMode: "walk_forward",
@@ -61,6 +62,8 @@ const els = {
   klineHoverClose: document.querySelector("#klineHoverClose"),
   klineHoverChange: document.querySelector("#klineHoverChange"),
   detailReturns: document.querySelector("#detailReturns"),
+  detailReturnTitle: document.querySelector("#detailReturnTitle"),
+  detailReturnNote: document.querySelector("#detailReturnNote"),
   detailLoading: document.querySelector("#detailLoading"),
   detailError: document.querySelector("#detailError"),
   industryPanel: document.querySelector(".industry-panel"),
@@ -99,6 +102,9 @@ const els = {
   strategyThesis: document.querySelector("#strategyThesis"),
   strategyEvidence: document.querySelector("#strategyEvidence"),
   strategyMetrics: document.querySelector("#strategyMetrics"),
+  strategyCredibilityLevel: document.querySelector("#strategyCredibilityLevel"),
+  strategyCredibilityGrid: document.querySelector("#strategyCredibilityGrid"),
+  strategyCredibilityNote: document.querySelector("#strategyCredibilityNote"),
   strategyCurve: document.querySelector("#strategyCurve"),
   strategyCurveMeta: document.querySelector("#strategyCurveMeta"),
   strategyCurveMethod: document.querySelector("#strategyCurveMethod"),
@@ -111,14 +117,20 @@ const els = {
   strategyRecommendationBody: document.querySelector("#strategyRecommendationBody"),
   strategyTableWrap: document.querySelector("#strategyTableWrap"),
   strategyRecommendationEmpty: document.querySelector("#strategyRecommendationEmpty"),
+  strategyHistoryNote: document.querySelector("#strategyHistoryNote"),
+  strategyHistoryCount: document.querySelector("#strategyHistoryCount"),
+  strategyHistoryBody: document.querySelector("#strategyHistoryBody"),
+  strategyHistoryTableWrap: document.querySelector("#strategyHistoryTableWrap"),
+  strategyHistoryEmpty: document.querySelector("#strategyHistoryEmpty"),
   strategyError: document.querySelector("#strategyError"),
 };
 
 function syncTabPanels() {
   const showMainlineStockList = state.activeTab === "mainline" && state.stockListSource === "mainline";
+  const showStrategyStockDetail = state.activeTab === "strategy" && state.stockListSource === "strategy";
   els.tabMainline.hidden = state.activeTab !== "mainline" || showMainlineStockList;
-  els.tabStrategy.hidden = state.activeTab !== "strategy";
-  els.stockWorkspace.hidden = state.activeTab !== "b1" && !showMainlineStockList;
+  els.tabStrategy.hidden = state.activeTab !== "strategy" || showStrategyStockDetail;
+  els.stockWorkspace.hidden = state.activeTab !== "b1" && !showMainlineStockList && !showStrategyStockDetail;
 }
 
 const primaryColumns = [
@@ -785,6 +797,7 @@ function renderCachedDateData() {
 
 function showStockDetail(tsCode, name, options = {}) {
   state.detailReturnTarget = options.returnTarget || null;
+  state.detailCase = options.strategyCase || null;
   syncTabPanels();
   els.listPanel.hidden = true;
   els.industryPanel.hidden = true;
@@ -797,6 +810,10 @@ function showStockDetail(tsCode, name, options = {}) {
   els.klineChart.innerHTML = "";
   updateKlineHoverInfo();
   els.detailReturns.innerHTML = "";
+  els.detailReturnTitle.textContent = state.detailCase ? "策略历史案例" : "B标记收益";
+  els.detailReturnNote.textContent = state.detailCase
+    ? `${state.detailCase.strategy_name || "策略"} · ${state.detailCase.evidence_label || "历史回测"}`
+    : "近20个交易日内出现的B，按次日开盘买入计算至最新收盘。";
   els.detailMeta.textContent = "获取日线数据中…";
 
   loadStockDetailData(tsCode)
@@ -810,9 +827,20 @@ function showStockDetail(tsCode, name, options = {}) {
       els.detailName.textContent = data.name || name || "--";
       const signalDates = data.signal_dates || state.manifest?.signal_dates?.[data.ts_code] || state.manifest?.signal_dates?.[tsCode] || [];
       const signalCount = signalDates.length;
-      els.detailMeta.textContent = `${data.count} 个交易日${signalCount ? ` · ${signalCount} 个B标记` : ""}`;
-      renderKlineChart(data.kline, data.name || tsCode, signalDates);
-      renderSignalReturns(data.kline, signalDates);
+      els.detailMeta.textContent = state.detailCase
+        ? `${data.count} 个交易日 · 信号 ${displayDate(state.detailCase.signal_date)} · 扣费收益 ${strategyMetricValue(state.detailCase.net_return_pct, "%")}`
+        : `${data.count} 个交易日${signalCount ? ` · ${signalCount} 个B标记` : ""}`;
+      renderKlineChart(
+        data.kline,
+        data.name || tsCode,
+        state.detailCase ? [] : signalDates,
+        state.detailCase,
+      );
+      if (state.detailCase) {
+        renderStrategyCaseSummary(state.detailCase);
+      } else {
+        renderSignalReturns(data.kline, signalDates);
+      }
     })
     .catch((err) => {
       els.detailLoading.hidden = true;
@@ -822,6 +850,14 @@ function showStockDetail(tsCode, name, options = {}) {
 }
 
 function backToList() {
+  if (state.detailReturnTarget === "strategy") {
+    state.detailCase = null;
+    state.stockListSource = "b1";
+    els.detailPanel.hidden = true;
+    syncTabPanels();
+    els.strategyDetail?.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
   if (state.detailReturnTarget === "focus-stocks") {
     showMainlineDashboard(els.focusStockSection);
     return;
@@ -917,7 +953,44 @@ function renderSignalReturns(kline, signalDates) {
   }
 }
 
-function renderKlineChart(kline, stockLabel, signalDates = []) {
+function renderStrategyCaseSummary(strategyCase) {
+  els.detailReturns.innerHTML = "";
+  const rows = [
+    ["信号日", displayDate(strategyCase.signal_date)],
+    ["买入日", displayDate(strategyCase.entry_date)],
+    ["退出日", displayDate(strategyCase.exit_date)],
+    ["扣费收益", strategyMetricValue(strategyCase.net_return_pct, "%")],
+    ["证据口径", strategyCase.evidence_label || "--"],
+    ["退出方式", strategyCase.exit_reason || "--"],
+  ];
+  for (const [label, value] of rows) {
+    const item = document.createElement("div");
+    item.className = "detail-return-row";
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+    const valueNode = document.createElement("strong");
+    valueNode.textContent = value;
+    if (label === "扣费收益") {
+      valueNode.className = Number(strategyCase.net_return_pct) >= 0 ? "return-up" : "return-down";
+    }
+    item.append(labelNode, valueNode);
+    els.detailReturns.append(item);
+  }
+  const reasons = document.createElement("div");
+  reasons.className = "detail-case-reasons";
+  const title = document.createElement("strong");
+  title.textContent = "信号理由";
+  const list = document.createElement("ul");
+  for (const reason of strategyCase.reasons || []) {
+    const item = document.createElement("li");
+    item.textContent = reason;
+    list.append(item);
+  }
+  reasons.append(title, list);
+  els.detailReturns.append(reasons);
+}
+
+function renderKlineChart(kline, stockLabel, signalDates = [], strategyCase = null) {
   const svg = els.klineChart;
   svg.innerHTML = "";
 
@@ -1067,6 +1140,26 @@ function renderKlineChart(kline, stockLabel, signalDates = []) {
     });
     marker.textContent = "B";
     svg.append(marker);
+  }
+
+  if (strategyCase) {
+    const caseMarkers = [
+      [strategyCase.signal_date, "S", "case-signal"],
+      [strategyCase.entry_date, "买", "case-entry"],
+      [strategyCase.exit_date, "卖", "case-exit"],
+    ];
+    for (const [date, label, className] of caseMarkers) {
+      const index = dates.indexOf(String(date || ""));
+      if (index < 0) continue;
+      const marker = svgNode("text", {
+        x: xFor(index),
+        y: Math.max(pad.top + 12, yFor(highs[index]) - 8),
+        "text-anchor": "middle",
+        class: `kline-case-marker ${className}`,
+      });
+      marker.textContent = label;
+      svg.append(marker);
+    }
   }
 
   // Legend
@@ -2142,6 +2235,41 @@ function renderStrategyRules(strategy) {
   }
 }
 
+function renderStrategyCredibility(strategy) {
+  const credibility = strategy.credibility || {};
+  els.strategyCredibilityLevel.textContent = credibility.evidence_label || "数据不足";
+  els.strategyCredibilityGrid.innerHTML = "";
+  const items = [
+    ["回测历史", credibility.history_years == null ? "--" : `${Number(credibility.history_years).toFixed(1)} 年`],
+    ["完成交易", credibility.completed_trade_count == null ? "--" : Number(credibility.completed_trade_count).toLocaleString("zh-CN")],
+    ["涉及股票", credibility.unique_stock_count == null ? "--" : Number(credibility.unique_stock_count).toLocaleString("zh-CN")],
+    ["信号日期", credibility.signal_date_count == null ? "--" : Number(credibility.signal_date_count).toLocaleString("zh-CN")],
+    ["样本外交易", credibility.oos_completed_trade_count == null ? "--" : Number(credibility.oos_completed_trade_count).toLocaleString("zh-CN")],
+    ["启用窗口", `${credibility.enabled_windows ?? 0}/${credibility.total_windows ?? 0}`],
+  ];
+  for (const [label, value] of items) {
+    const item = document.createElement("div");
+    item.className = "strategy-credibility-item";
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+    const valueNode = document.createElement("strong");
+    valueNode.textContent = value;
+    item.append(labelNode, valueNode);
+    els.strategyCredibilityGrid.append(item);
+  }
+  els.strategyCredibilityNote.textContent = credibility.sample_warning
+    || "信号数量不等于独立样本；需结合样本外窗口、市场周期和真实成交约束判断。";
+}
+
+function openStrategyStock(strategy, row, strategyCase = null) {
+  if (!row?.ts_code) return;
+  state.stockListSource = "strategy";
+  showStockDetail(row.ts_code, row.name || row.ts_code, {
+    returnTarget: "strategy",
+    strategyCase: strategyCase ? { ...strategyCase, strategy_name: strategy.name } : null,
+  });
+}
+
 function renderStrategyRecommendations(strategy) {
   const rows = Array.isArray(strategy.recommendations) ? strategy.recommendations : [];
   const signalLabel = strategy.current_signal_label || "原始信号";
@@ -2168,12 +2296,18 @@ function renderStrategyRecommendations(strategy) {
     values.forEach((value, index) => {
       const td = document.createElement("td");
       if (index === 1) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "strategy-stock-button";
+        button.title = `查看 ${row.name || row.ts_code} 日线`;
+        button.addEventListener("click", () => openStrategyStock(strategy, row));
         const name = document.createElement("strong");
         name.textContent = row.name || row.ts_code;
         const code = document.createElement("small");
         code.textContent = row.ts_code || "--";
         td.className = "strategy-stock-cell";
-        td.append(name, code);
+        button.append(name, code);
+        td.append(button);
       } else if (index === 2) {
         const action = document.createElement("span");
         action.className = `strategy-action ${strategy.status === "active" ? "action-buy" : "action-watch"}`;
@@ -2191,6 +2325,68 @@ function renderStrategyRecommendations(strategy) {
   }
 }
 
+function renderStrategyHistory(strategy) {
+  const history = strategy.historical_cases || {};
+  const wins = Array.isArray(history.wins) ? history.wins : [];
+  const losses = Array.isArray(history.losses) ? history.losses : [];
+  const rows = [...wins, ...losses].sort((a, b) =>
+    String(b.signal_date || "").localeCompare(String(a.signal_date || ""))
+    || String(a.ts_code || "").localeCompare(String(b.ts_code || ""))
+  );
+  els.strategyHistoryBody.innerHTML = "";
+  els.strategyHistoryTableWrap.hidden = rows.length === 0;
+  els.strategyHistoryEmpty.hidden = rows.length > 0;
+  els.strategyHistoryNote.textContent = history.definition
+    || "最近已完成的盈利与亏损交易，点击股票查看日线。";
+  els.strategyHistoryCount.textContent = `盈利 ${history.win_count ?? wins.length} · 亏损 ${history.loss_count ?? losses.length}`;
+
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    const outcomeCell = document.createElement("td");
+    const outcome = document.createElement("span");
+    outcome.className = `strategy-case-outcome ${row.outcome === "win" ? "case-win" : "case-loss"}`;
+    outcome.textContent = row.outcome_label || (row.outcome === "win" ? "盈利" : "亏损");
+    outcomeCell.append(outcome);
+
+    const scopeCell = document.createElement("td");
+    const scope = document.createElement("span");
+    scope.className = `strategy-case-scope ${row.evidence_scope === "rolling_oos" ? "scope-oos" : "scope-full"}`;
+    scope.textContent = row.evidence_label || "全样本参考";
+    scopeCell.append(scope);
+
+    const stockCell = document.createElement("td");
+    stockCell.className = "strategy-stock-cell";
+    const stockButton = document.createElement("button");
+    stockButton.type = "button";
+    stockButton.className = "strategy-stock-button";
+    stockButton.title = `查看 ${row.name || row.ts_code} 日线与案例位置`;
+    stockButton.addEventListener("click", () => openStrategyStock(strategy, row, row));
+    const name = document.createElement("strong");
+    name.textContent = row.name || row.ts_code;
+    const code = document.createElement("small");
+    code.textContent = row.ts_code || "--";
+    stockButton.append(name, code);
+    stockCell.append(stockButton);
+
+    const signalDate = document.createElement("td");
+    signalDate.textContent = displayDate(row.signal_date);
+    const entryDate = document.createElement("td");
+    entryDate.textContent = displayDate(row.entry_date);
+    const exitDate = document.createElement("td");
+    exitDate.textContent = displayDate(row.exit_date);
+    const returnCell = document.createElement("td");
+    returnCell.className = Number(row.net_return_pct) >= 0 ? "return-up" : "return-down";
+    returnCell.textContent = strategyMetricValue(row.net_return_pct, "%");
+    const exitReason = document.createElement("td");
+    exitReason.textContent = row.exit_reason || "--";
+    const reasons = document.createElement("td");
+    reasons.className = "strategy-reasons-cell";
+    reasons.textContent = (row.reasons || []).join(" · ");
+    tr.append(outcomeCell, scopeCell, stockCell, signalDate, entryDate, exitDate, returnCell, exitReason, reasons);
+    els.strategyHistoryBody.append(tr);
+  }
+}
+
 function renderStrategyDetail(strategy) {
   els.strategyDetail.hidden = false;
   els.strategyError.hidden = true;
@@ -2200,9 +2396,11 @@ function renderStrategyDetail(strategy) {
   els.strategyThesis.textContent = strategy.thesis || "--";
   els.strategyEvidence.textContent = strategy.evidence || "--";
   renderStrategyMetrics(strategy);
+  renderStrategyCredibility(strategy);
   renderStrategyCurve(strategy);
   renderStrategyRules(strategy);
   renderStrategyRecommendations(strategy);
+  renderStrategyHistory(strategy);
 }
 
 function renderStrategies(payload) {
@@ -2243,6 +2441,9 @@ function switchTab(tabName, options = {}) {
   state.activeTab = tabName;
   if (tabName === "b1") {
     state.stockListSource = "b1";
+  } else if (tabName === "strategy" && state.stockListSource === "strategy") {
+    state.stockListSource = "b1";
+    state.detailCase = null;
   }
 
   // Update tab buttons

@@ -6,8 +6,10 @@ from strategy import r1_reversal
 from strategy.dashboard import (
     WALK_FORWARD_GATES,
     _curve_from_aggregates,
+    _credibility_payload,
     _event_metrics,
     _golden_recommendations,
+    _historical_cases,
     _walk_forward_selection,
 )
 
@@ -31,6 +33,76 @@ class StrategyDashboardTests(unittest.TestCase):
         self.assertAlmostEqual(curve["points"][0]["nav"], 1.1)
         self.assertAlmostEqual(curve["points"][1]["nav"], 0.99)
         self.assertAlmostEqual(curve["max_drawdown_pct"], -10.0)
+
+    def test_historical_cases_include_recent_wins_losses_and_oos_scope(self):
+        frame = pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ", "000002.SZ", "000003.SZ"],
+                "trade_date": ["20260102", "20260105", "20260106"],
+                "entry_index": [1, 2, 3],
+                "actual_ret": [0.03, -0.01, 0.01],
+                "trend_short": [9.0, 9.2, 9.4],
+                "bull_bear": [10.0, 10.0, 10.0],
+                "stop_t2": [False, True, False],
+                "stop_t3": [False, False, True],
+            }
+        )
+        signal = pd.Series(True, index=frame.index)
+        oos = pd.Series([True, False, False], index=frame.index)
+        exit_index = pd.Series([2, 3, 4], index=frame.index)
+        lookup = pd.DataFrame(
+            {
+                "ts_code": frame["ts_code"],
+                "name": ["股票一", "股票二", "股票三"],
+                "industry": ["银行", "软件", "机械"],
+            }
+        )
+
+        cases = _historical_cases(
+            frame,
+            signal,
+            oos,
+            "actual_ret",
+            exit_index,
+            "20260101",
+            lookup,
+            {1: "20260105", 2: "20260106", 3: "20260107", 4: "20260108"},
+            "b2_reversion",
+        )
+
+        self.assertEqual(cases["completed_count"], 3)
+        self.assertEqual(cases["win_count"], 2)
+        self.assertEqual(cases["loss_count"], 1)
+        self.assertEqual(cases["wins"][-1]["evidence_label"], "滚动样本外")
+        self.assertEqual(cases["losses"][0]["exit_reason"], "第2日开盘触发止损")
+
+    def test_credibility_counts_stocks_dates_and_oos_completed_trades(self):
+        frame = pd.DataFrame(
+            {
+                "ts_code": ["000001.SZ", "000001.SZ", "000002.SZ"],
+                "trade_date": ["20260102", "20260105", "20260105"],
+                "ret": [0.01, 0.02, float("nan")],
+            }
+        )
+        signal = pd.Series(True, index=frame.index)
+        oos = pd.Series([True, False, True], index=frame.index)
+        walk_forward = {"metrics": {"enabled_windows": 2, "total_windows": 5}}
+
+        credibility = _credibility_payload(
+            frame,
+            signal,
+            oos,
+            "ret",
+            "20260101",
+            "20261231",
+            walk_forward,
+        )
+
+        self.assertEqual(credibility["completed_trade_count"], 2)
+        self.assertEqual(credibility["unique_stock_count"], 1)
+        self.assertEqual(credibility["signal_date_count"], 2)
+        self.assertEqual(credibility["oos_completed_trade_count"], 1)
+        self.assertEqual(credibility["evidence_level"], "rolling_oos")
 
     def test_curve_treats_starting_cash_as_the_initial_peak(self):
         aggregate = pd.DataFrame(

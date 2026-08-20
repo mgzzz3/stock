@@ -5,10 +5,37 @@ from pathlib import Path
 
 import pandas as pd
 
-from export_web_data import build_concept_payload, combine_files, is_stock_limit_up
+from export_web_data import (
+    build_concept_payload,
+    collect_strategy_codes,
+    combine_files,
+    is_stock_limit_up,
+)
 
 
 class CombineWebDataTests(unittest.TestCase):
+    def test_strategy_codes_include_recommendations_and_both_case_outcomes(self):
+        payload = {
+            "strategies": [
+                {
+                    "recommendations": [{"ts_code": "000001.SZ"}],
+                    "historical_cases": {
+                        "wins": [{"ts_code": "600000.SH"}],
+                        "losses": [{"ts_code": "920001.BJ"}],
+                    },
+                }
+            ]
+        }
+
+        self.assertEqual(
+            collect_strategy_codes(payload),
+            {"000001.SZ", "600000.SH", "920001.BJ"},
+        )
+        self.assertEqual(
+            collect_strategy_codes(payload, cases_only=True),
+            {"600000.SH", "920001.BJ"},
+        )
+
     def test_predictions_annotate_signals_and_keep_unmatched_picks(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

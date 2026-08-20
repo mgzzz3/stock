@@ -32,6 +32,7 @@ BACKTEST_CALENDAR_DAYS = 720
 WARMUP_CALENDAR_DAYS = 220
 ROUND_TRIP_COST = 0.002
 MAX_RECOMMENDATIONS = 8
+HISTORICAL_CASES_PER_OUTCOME = 4
 WALK_FORWARD_TRAIN_DAYS = 252
 WALK_FORWARD_TEST_DAYS = 21
 
@@ -564,6 +565,193 @@ def _safe_stock_name(value: object) -> bool:
     return "ST" not in name and "退" not in name
 
 
+def _case_reasons(
+    strategy_id: str,
+    row: pd.Series,
+    value_details: dict[tuple[str, str], object] | None = None,
+) -> list[str]:
+    """Describe only values that were available on the signal date."""
+    if strategy_id == "r1_reversal":
+        return [
+            f"三月形成期收益 {float(row['r1_formation_return']) * 100:.1f}%，进入月末错杀组",
+            f"市场20日中位收益 {float(row['r1_market_median_20']) * 100:.1f}%，市场门控开启",
+            f"20日均成交额 {float(row['r1_amount_20']) / 100_000:.1f} 亿元",
+        ]
+    if strategy_id == "breakout_55":
+        return [
+            f"收盘突破前55日高点 {float(row['breakout_strength_pct']):.1f}%",
+            f"成交量为20日均量 {float(row['breakout_volume_ratio']):.2f} 倍",
+            f"市场20日中位收益 {float(row['r1_market_median_20']) * 100:.1f}%",
+        ]
+    if strategy_id == "trend_alignment":
+        return [
+            "MA20 > MA60 > MA120，且 MA120 较20日前上行",
+            f"120日收益 {float(row['trend_return_120']) * 100:.1f}%",
+            f"20日均成交额 {float(row['r1_amount_20']) / 100_000:.1f} 亿元，市场门控开启",
+        ]
+    if strategy_id == "value_quality":
+        details = (value_details or {}).get((str(row["ts_code"]), str(row["trade_date"])))
+        if details is None:
+            return ["点时财报质量、现金流与合理估值筛选通过"]
+        return [
+            f"近3年 ROE 中位数 {float(details.roe_3y_median):.1f}%、最低 {float(details.roe_3y_min):.1f}%",
+            f"营收/净利增速中位数 {float(details.revenue_yoy_3y_median):.1f}%/{float(details.net_profit_yoy_3y_median):.1f}%",
+            f"PE 代理 {float(details.pe_proxy):.1f}、PB 代理 {float(details.pb_proxy):.1f}，经营现金流连续3年为正",
+        ]
+    if strategy_id == "ma20_ma60":
+        return [
+            f"前一日 MA20 {float(row['ma20_prev']):.2f} ≤ MA60 {float(row['ma60_prev']):.2f}",
+            f"信号日 MA20 {float(row['ma20']):.2f} > MA60 {float(row['ma60']):.2f}",
+            "信号收盘确认，次日开盘进入回测",
+        ]
+    if strategy_id == "b2_reversion":
+        gap_pct = (
+            (float(row["bull_bear"]) - float(row["trend_short"]))
+            / float(row["bull_bear"])
+            * 100
+        )
+        return [
+            f"短趋势线低于多空线 {gap_pct:.1f}%",
+            "满足 B2 趋势下方反转原始信号",
+            "次日开盘进入，按买入日低点止损或最迟第4日开盘退出",
+        ]
+    volume_ratio = float(row["vol"]) / float(row["vol_ma5"])
+    return [
+        f"J 值 {float(row['j']):.1f} < 15，处于超卖区",
+        f"成交量为5日均量 {volume_ratio:.2f} 倍，属于缩量",
+        "收盘在 MA60 和多空线上方，短趋势高于多空线",
+    ]
+
+
+def _historical_cases(
+    frame: pd.DataFrame,
+    signal_mask: pd.Series,
+    oos_mask: pd.Series,
+    return_column: str,
+    exit_index: pd.Series,
+    scan_start: str,
+    stock_lookup: pd.DataFrame,
+    date_by_index: dict[int, str],
+    strategy_id: str,
+    *,
+    value_details: dict[tuple[str, str], object] | None = None,
+) -> dict[str, object]:
+    """Return recent completed wins and losses without cherry-picking magnitude."""
+    completed = (
+        signal_mask
+        & frame["trade_date"].ge(scan_start)
+        & frame[return_column].notna()
+        & frame["entry_index"].notna()
+        & exit_index.notna()
+    )
+    completed_returns = frame.loc[completed, return_column].astype(float)
+    net_returns = completed_returns - ROUND_TRIP_COST
+    win_count = int(net_returns.gt(0).sum())
+    loss_count = int(net_returns.le(0).sum())
+    lookup = stock_lookup.drop_duplicates("ts_code").set_index("ts_code")
+
+    def rows_for(outcome: str) -> list[dict[str, object]]:
+        outcome_mask = net_returns.gt(0) if outcome == "win" else net_returns.le(0)
+        indices = net_returns.index[outcome_mask]
+        if indices.empty:
+            return []
+        recent = frame.loc[indices, ["trade_date", "ts_code"]].copy()
+        recent = recent.sort_values(
+            ["trade_date", "ts_code"],
+            ascending=[False, True],
+        ).head(HISTORICAL_CASES_PER_OUTCOME)
+        cases = []
+        for index in recent.index:
+            row = frame.loc[index]
+            ts_code = str(row["ts_code"])
+            stock = lookup.loc[ts_code] if ts_code in lookup.index else None
+            name = str(stock["name"] or ts_code) if stock is not None else ts_code
+            industry = str(stock["industry"] or "未分类") if stock is not None else "未分类"
+            exit_reason = None
+            if strategy_id in {"b1_pullback", "b2_reversion"}:
+                if bool(row.get("stop_t2", False)):
+                    exit_reason = "第2日开盘触发止损"
+                elif bool(row.get("stop_t3", False)):
+                    exit_reason = "第3日开盘触发止损"
+                else:
+                    exit_reason = "第4日开盘到期退出"
+            elif strategy_id == "value_quality":
+                exit_reason = "持有63个交易日后开盘退出"
+            elif strategy_id == "ma20_ma60":
+                exit_reason = "持有至第20个交易日收盘"
+            else:
+                exit_reason = "持有20个交易日后开盘退出"
+            gross_return = float(row[return_column])
+            cases.append(
+                {
+                    "outcome": outcome,
+                    "outcome_label": "盈利" if outcome == "win" else "亏损",
+                    "ts_code": ts_code,
+                    "name": name,
+                    "industry": industry,
+                    "signal_date": str(row["trade_date"]),
+                    "entry_date": date_by_index.get(int(row["entry_index"])),
+                    "exit_date": date_by_index.get(int(exit_index.loc[index])),
+                    "gross_return_pct": round(gross_return * 100, 2),
+                    "net_return_pct": round((gross_return - ROUND_TRIP_COST) * 100, 2),
+                    "evidence_scope": "rolling_oos" if bool(oos_mask.loc[index]) else "full_sample",
+                    "evidence_label": "滚动样本外" if bool(oos_mask.loc[index]) else "全样本参考",
+                    "exit_reason": exit_reason,
+                    "reasons": _case_reasons(strategy_id, row, value_details),
+                }
+            )
+        return cases
+
+    return {
+        "definition": "最近已完成退出的4笔盈利与4笔亏损；收益已扣除0.20%往返成本。",
+        "completed_count": int(completed.sum()),
+        "win_count": win_count,
+        "loss_count": loss_count,
+        "wins": rows_for("win"),
+        "losses": rows_for("loss"),
+    }
+
+
+def _credibility_payload(
+    frame: pd.DataFrame,
+    signal_mask: pd.Series,
+    oos_mask: pd.Series,
+    return_column: str,
+    scan_start: str,
+    as_of_date: str,
+    walk_forward: dict[str, object],
+) -> dict[str, object]:
+    completed = (
+        signal_mask
+        & frame["trade_date"].between(scan_start, as_of_date)
+        & frame[return_column].notna()
+    )
+    oos_completed = oos_mask & frame[return_column].notna()
+    rows = frame.loc[completed, ["ts_code", "trade_date"]]
+    metrics = walk_forward.get("metrics", {})
+    enabled_windows = int(metrics.get("enabled_windows") or 0)
+    total_windows = int(metrics.get("total_windows") or 0)
+    oos_count = int(oos_completed.sum())
+    return {
+        "evidence_level": "rolling_oos" if oos_count else "full_sample_only",
+        "evidence_label": "存在滚动样本外交易" if oos_count else "仅全样本参考",
+        "price_history_start": scan_start,
+        "price_history_end": as_of_date,
+        "history_years": round(
+            (datetime.strptime(as_of_date, "%Y%m%d") - datetime.strptime(scan_start, "%Y%m%d")).days
+            / 365.25,
+            1,
+        ),
+        "completed_trade_count": int(completed.sum()),
+        "unique_stock_count": int(rows["ts_code"].nunique()) if not rows.empty else 0,
+        "signal_date_count": int(rows["trade_date"].nunique()) if not rows.empty else 0,
+        "oos_completed_trade_count": oos_count,
+        "enabled_windows": enabled_windows,
+        "total_windows": total_windows,
+        "sample_warning": "股票×日期信号可能连续重复，不应把全部信号视为相互独立样本。",
+    }
+
+
 def _golden_recommendations(
     current: pd.DataFrame,
     stock_lookup: pd.DataFrame,
@@ -975,6 +1163,7 @@ def build_strategy_dashboard(
         )
         trade_dates = sorted(daily["trade_date"].astype(str).unique())
         trade_date_index = {date: index for index, date in enumerate(trade_dates)}
+        date_by_index = {index: date for date, index in trade_date_index.items()}
         daily["trade_index"] = daily["trade_date"].map(trade_date_index).astype("int16")
         daily = r1_reversal.add_features(daily, copy=False)
         daily = technical_expansion.add_features(daily, copy=False)
@@ -1001,6 +1190,7 @@ def build_strategy_dashboard(
             (daily["ma20"] > daily["ma60"])
             & (daily["ma20_prev"] <= daily["ma60_prev"])
         )
+        daily["entry_index"] = grouped["trade_index"].shift(-1)
         daily["open_t1"] = grouped["open"].shift(-1)
         daily["close_t20"] = grouped["close"].shift(-20)
         daily["exit_index_20"] = grouped["trade_index"].shift(-20)
@@ -1253,6 +1443,10 @@ def build_strategy_dashboard(
             value_prices,
             as_of_date,
         )
+        value_case_details = {
+            (str(row.ts_code), str(row.trade_date)): row
+            for row in value_selected.itertuples(index=False)
+        }
         value_signal = _signal_mask_from_pairs(daily, value_selected)
         value_recommendations = _value_recommendations(value_latest, stock_lookup)
         value_valid = (
@@ -1369,6 +1563,48 @@ def build_strategy_dashboard(
             "252 个交易日训练、21 个交易日样本外测试；训练交易须在测试前完成退出，门控通过后才持仓。",
         )
 
+        r1_historical_cases = _historical_cases(
+            daily, r1_signal, r1_wf_mask, "r1_actual_ret", daily["r1_exit_index"],
+            scan_start, stock_lookup, date_by_index, "r1_reversal",
+        )
+        r1_credibility = _credibility_payload(
+            daily, r1_signal, r1_wf_mask, "r1_actual_ret", scan_start,
+            as_of_date, r1_walk_forward,
+        )
+        breakout_historical_cases = _historical_cases(
+            daily, breakout_signal, breakout_wf_mask, "r1_actual_ret", daily["r1_exit_index"],
+            scan_start, stock_lookup, date_by_index, "breakout_55",
+        )
+        breakout_credibility = _credibility_payload(
+            daily, breakout_signal, breakout_wf_mask, "r1_actual_ret", scan_start,
+            as_of_date, breakout_walk_forward,
+        )
+        trend_historical_cases = _historical_cases(
+            daily, trend_signal, trend_wf_mask, "r1_actual_ret", daily["r1_exit_index"],
+            scan_start, stock_lookup, date_by_index, "trend_alignment",
+        )
+        trend_credibility = _credibility_payload(
+            daily, trend_signal, trend_wf_mask, "r1_actual_ret", scan_start,
+            as_of_date, trend_walk_forward,
+        )
+        value_historical_cases = _historical_cases(
+            daily, value_signal, value_wf_mask, "value_actual_ret", daily["value_exit_index"],
+            scan_start, stock_lookup, date_by_index, "value_quality",
+            value_details=value_case_details,
+        )
+        value_credibility = _credibility_payload(
+            daily, value_signal, value_wf_mask, "value_actual_ret", scan_start,
+            as_of_date, value_walk_forward,
+        )
+        golden_historical_cases = _historical_cases(
+            daily, daily["golden_cross"], golden_wf_mask, "ret_20d", daily["exit_index_20"],
+            scan_start, stock_lookup, date_by_index, "ma20_ma60",
+        )
+        golden_credibility = _credibility_payload(
+            daily, daily["golden_cross"], golden_wf_mask, "ret_20d", scan_start,
+            as_of_date, golden_walk_forward,
+        )
+
         # Merge persisted indicators only after the larger 20-day curve has
         # been built, keeping peak memory bounded during the daily export.
         zhixing = pd.read_sql_query(
@@ -1476,6 +1712,14 @@ def build_strategy_dashboard(
         WALK_FORWARD_GATES["b2_reversion"],
         "252 个交易日训练、21 个交易日样本外测试；训练交易须在测试前完成退出，门控通过后才持仓。",
     )
+    b2_historical_cases = _historical_cases(
+        daily, b2_signal, b2_wf_mask, "actual_ret", daily["stopped_exit_index"],
+        scan_start, stock_lookup, date_by_index, "b2_reversion",
+    )
+    b2_credibility = _credibility_payload(
+        daily, b2_signal, b2_wf_mask, "actual_ret", scan_start,
+        as_of_date, b2_walk_forward,
+    )
 
     b1_signal = (
         (daily["vol"] / daily["vol_ma5"] < 1)
@@ -1528,6 +1772,14 @@ def build_strategy_dashboard(
         b1_wf_curve,
         WALK_FORWARD_GATES["b1_pullback"],
         "252 个交易日训练、21 个交易日样本外测试；训练交易须在测试前完成退出，门控通过后才持仓。",
+    )
+    b1_historical_cases = _historical_cases(
+        daily, b1_signal, b1_wf_mask, "actual_ret", daily["stopped_exit_index"],
+        scan_start, stock_lookup, date_by_index, "b1_pullback",
+    )
+    b1_credibility = _credibility_payload(
+        daily, b1_signal, b1_wf_mask, "actual_ret", scan_start,
+        as_of_date, b1_walk_forward,
     )
     b1_current_count = int(len(b1_current))
 
@@ -1639,6 +1891,8 @@ def build_strategy_dashboard(
             "curve": r1_curve["points"],
             "curve_method": "完整月末等权持仓，次日开盘买入、第21个交易日开盘退出；含0.20%往返成本。",
             "walk_forward": r1_walk_forward,
+            "credibility": r1_credibility,
+            "historical_cases": r1_historical_cases,
             "research_split": r1_research_split,
             "known_limitations": [
                 "历史库没有点时 ST 名称快照，回测未排除历史 ST；实时观察池会剔除当前 ST 与退市风险股票。",
@@ -1670,6 +1924,8 @@ def build_strategy_dashboard(
             "curve": breakout_curve["points"],
             "curve_method": "除权价格55日放量突破，次日开盘等权买入、第21日开盘退出；含0.20%往返成本。",
             "walk_forward": breakout_walk_forward,
+            "credibility": breakout_credibility,
+            "historical_cases": breakout_historical_cases,
             "known_limitations": [
                 "未模拟涨停封板无法买入与突破日之后的开盘滑点。",
                 "固定20日退出用于统一审计，不等于最优的移动止损规则。",
@@ -1695,6 +1951,8 @@ def build_strategy_dashboard(
             "curve": trend_curve["points"],
             "curve_method": "除权价格多周期趋势首次对齐，次日开盘等权买入、第21日开盘退出；含0.20%往返成本。",
             "walk_forward": trend_walk_forward,
+            "credibility": trend_credibility,
+            "historical_cases": trend_historical_cases,
             "known_limitations": [
                 "趋势论文证据主要来自跨资产期货，不能直接外推为A股个股收益。",
                 "固定20日审计窗口可能提前截断长趋势，页面结果必须按本项目数据解释。",
@@ -1726,6 +1984,8 @@ def build_strategy_dashboard(
             "curve": value_curve["points"],
             "curve_method": "季度末点时财报筛选后建立63交易日等权审计组合；含0.20%往返成本。",
             "walk_forward": value_walk_forward,
+            "credibility": value_credibility,
+            "historical_cases": value_historical_cases,
             "known_limitations": [
                 "PE/PB为年报EPS、每股净资产与当时股价计算的保守代理，不是完整现金流折现估值。",
                 "公告源保留最新公告日并保守延后使用，可避免明显未来函数，但历史更正版本与当时原始版本仍可能不同。",
@@ -1757,6 +2017,8 @@ def build_strategy_dashboard(
             "curve": golden_curve["points"],
             "curve_method": "每日等权所有有效金叉持仓，次日开盘买入、持有 20 个交易日；含 0.20% 往返成本。",
             "walk_forward": golden_walk_forward,
+            "credibility": golden_credibility,
+            "historical_cases": golden_historical_cases,
             "recommendations": golden_recommendations,
         },
         {
@@ -1778,6 +2040,8 @@ def build_strategy_dashboard(
             "curve": b2_curve["points"],
             "curve_method": "每日等权所有 B2 有效持仓，沿用项目的次日开盘买入与 3 日内退出规则；含 0.20% 往返成本。",
             "walk_forward": b2_walk_forward,
+            "credibility": b2_credibility,
+            "historical_cases": b2_historical_cases,
             "recommendations": b2_observations,
         },
         {
@@ -1799,6 +2063,8 @@ def build_strategy_dashboard(
             "curve": b1_curve["points"],
             "curve_method": "每日等权所有 B1 有效持仓，沿用项目的次日开盘买入与 3 日内退出规则；含 0.20% 往返成本。",
             "walk_forward": b1_walk_forward,
+            "credibility": b1_credibility,
+            "historical_cases": b1_historical_cases,
             "recommendations": b1_recommendations,
         },
     ]
