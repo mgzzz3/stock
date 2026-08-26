@@ -29,3 +29,6 @@ data/
 
 # Claude Code per-machine settings (keep .claude/settings.json shareable)
 .claude/settings.local.json
+
+# OpenClaw media staging (never commit)
+media/
