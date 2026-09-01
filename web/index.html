@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>A 股信号浏览</title>
-    <link rel="stylesheet" href="styles.css?v=kline-zoom-3" />
+    <link rel="stylesheet" href="styles.css?v=emotion-1" />
   </head>
   <body>
     <main class="shell">
@@ -19,6 +19,7 @@
 
         <nav class="view-tabs" id="viewTabs" aria-label="视图切换">
           <button type="button" class="view-tab active" data-tab="mainline">🔥 主线</button>
+          <button type="button" class="view-tab" data-tab="emotion">情绪</button>
           <button type="button" class="view-tab" data-tab="b1">B1</button>
           <button type="button" class="view-tab" data-tab="strategy">策略</button>
         </nav>
@@ -137,6 +138,136 @@
               </thead>
               <tbody id="focusStockTableBody"></tbody>
             </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- ════ 情绪 Tab ════ -->
+      <div class="tab-content" id="tabEmotion" data-tab="emotion" hidden>
+        <section class="emotion-panel" aria-label="市场情绪监控">
+          <div class="section-head emotion-page-head">
+            <div>
+              <h2>市场情绪中枢</h2>
+              <p id="emotionSubtitle">加载全市场情绪结构</p>
+            </div>
+            <div class="emotion-phase phase-divergence" id="emotionPhase">--</div>
+          </div>
+
+          <div class="emotion-overview">
+            <article class="emotion-score-card" aria-label="市场情绪分">
+              <div class="emotion-gauge" id="emotionGauge" style="--emotion-score: 0">
+                <div class="emotion-gauge-inner">
+                  <strong id="emotionScore">--</strong>
+                  <span>情绪分</span>
+                </div>
+              </div>
+              <div class="emotion-score-meta">
+                <strong id="emotionScoreChange">--</strong>
+                <span>较上一交易日</span>
+              </div>
+            </article>
+
+            <article class="emotion-readout">
+              <div class="emotion-readout-head">
+                <span>今日判读</span>
+                <button class="emotion-method-button" id="emotionMethodButton" type="button" aria-expanded="false" aria-controls="emotionMethod">口径说明</button>
+              </div>
+              <p id="emotionSummary">正在读取市场数据…</p>
+              <div class="emotion-flags" id="emotionFlags" aria-label="情绪风险提示"></div>
+              <div class="emotion-method" id="emotionMethod" hidden>
+                <strong id="emotionFormula">--</strong>
+                <span id="emotionMethodNote">--</span>
+              </div>
+            </article>
+          </div>
+
+          <div class="emotion-kpis" id="emotionKpis" aria-label="市场情绪核心指标"></div>
+
+          <div class="emotion-analysis-grid">
+            <article class="emotion-card emotion-history-card">
+              <div class="chart-head">
+                <strong>近30日情绪周期</strong>
+                <span id="emotionHistoryMeta">--</span>
+              </div>
+              <div class="emotion-chart-wrap">
+                <svg id="emotionChart" viewBox="0 0 760 260" role="img" aria-label="近30日市场情绪分曲线"></svg>
+              </div>
+              <div class="emotion-zone-legend" aria-label="情绪阶段分区">
+                <span><i class="zone-dot zone-ice"></i>冰点</span>
+                <span><i class="zone-dot zone-mixed"></i>混沌</span>
+                <span><i class="zone-dot zone-warm"></i>升温</span>
+                <span><i class="zone-dot zone-climax"></i>高潮</span>
+              </div>
+            </article>
+
+            <article class="emotion-card emotion-components-card">
+              <div class="chart-head">
+                <strong>情绪分解</strong>
+                <span>五维加权</span>
+              </div>
+              <div class="emotion-components" id="emotionComponents"></div>
+            </article>
+          </div>
+
+          <div class="emotion-analysis-grid emotion-structure-grid">
+            <article class="emotion-card">
+              <div class="chart-head">
+                <strong>涨跌幅结构</strong>
+                <span id="emotionDistributionMeta">--</span>
+              </div>
+              <div class="emotion-distribution" id="emotionDistribution"></div>
+            </article>
+
+            <article class="emotion-card">
+              <div class="chart-head">
+                <strong>关键结构</strong>
+                <span>赚钱效应与风险</span>
+              </div>
+              <dl class="emotion-structure" id="emotionStructure"></dl>
+            </article>
+          </div>
+
+          <div class="emotion-table-grid">
+            <section class="emotion-table-wrap" aria-label="情绪载体板块">
+              <div class="chart-head">
+                <strong>情绪载体板块</strong>
+                <span>识别全面扩散或龙头独舞</span>
+              </div>
+              <table class="emotion-table">
+                <thead>
+                  <tr>
+                    <th>板块</th>
+                    <th>状态</th>
+                    <th>情绪强度</th>
+                    <th>平均涨幅</th>
+                    <th>上涨占比</th>
+                    <th>涨停数</th>
+                    <th>成交额</th>
+                  </tr>
+                </thead>
+                <tbody id="emotionSectorBody"></tbody>
+              </table>
+            </section>
+
+            <section class="emotion-table-wrap" aria-label="涨停核心股票">
+              <div class="chart-head">
+                <strong>涨停核心</strong>
+                <span id="emotionLeaderMeta">--</span>
+              </div>
+              <table class="emotion-table emotion-leader-table">
+                <thead>
+                  <tr>
+                    <th>股票</th>
+                    <th>代码</th>
+                    <th>行业</th>
+                    <th>状态</th>
+                    <th>涨幅</th>
+                    <th>成交额</th>
+                  </tr>
+                </thead>
+                <tbody id="emotionLeaderBody"></tbody>
+              </table>
+            </section>
           </div>
         </section>
       </div>
@@ -453,6 +584,6 @@
       </div>
     </main>
 
-    <script src="app.js?v=kline-zoom-3" defer></script>
+    <script src="app.js?v=emotion-1" defer></script>
   </body>
 </html>

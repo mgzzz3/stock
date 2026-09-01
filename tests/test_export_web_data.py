@@ -7,8 +7,10 @@ import pandas as pd
 
 from export_web_data import (
     build_concept_payload,
+    build_emotion_payload,
     collect_strategy_codes,
     combine_files,
+    is_stock_limit_down,
     is_stock_limit_up,
 )
 
@@ -154,6 +156,12 @@ class ConceptLimitUpTests(unittest.TestCase):
         self.assertTrue(is_stock_limit_up("600001.SH", "*ST示例", "20260706", 10, 11))
         self.assertFalse(is_stock_limit_up("600001.SH", "*ST示例", "20260706", 10, 10.5))
 
+    def test_limit_down_uses_each_markets_price_limit(self):
+        self.assertTrue(is_stock_limit_down("600001.SH", "主板", "20260817", 10, 9))
+        self.assertTrue(is_stock_limit_down("300001.SZ", "创业板", "20260817", 10, 8))
+        self.assertTrue(is_stock_limit_down("920001.BJ", "北交所", "20260817", 10, 7))
+        self.assertFalse(is_stock_limit_down("600001.SH", "主板", "20260817", 10, 9.01))
+
     def test_concept_payload_includes_limit_up_count(self):
         conn = sqlite3.connect(":memory:")
         conn.executescript(
@@ -224,6 +232,54 @@ class ConceptLimitUpTests(unittest.TestCase):
 
         self.assertIsNotNone(payload)
         self.assertIsNone(payload["concepts"][0]["limit_up_count"])
+        conn.close()
+
+
+class EmotionPayloadTests(unittest.TestCase):
+    def test_payload_includes_explainable_score_history_and_feedback(self):
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(
+            """
+            CREATE TABLE stock_basic (ts_code TEXT, name TEXT, industry TEXT);
+            CREATE TABLE daily (
+                ts_code TEXT, trade_date TEXT, high REAL, close REAL,
+                pre_close REAL, pct_chg REAL, amount REAL
+            );
+            INSERT INTO stock_basic VALUES
+                ('600001.SH', '领涨股', '种植业'),
+                ('600002.SH', '跟随股', '种植业');
+            """
+        )
+        rows = []
+        for day in range(1, 20):
+            trade_date = f"202601{day:02d}"
+            rows.extend(
+                [
+                    ("600001.SH", trade_date, 10, 10, 10, 0, 100000),
+                    ("600002.SH", trade_date, 10, 10, 10, 0, 100000),
+                ]
+            )
+        rows.extend(
+            [
+                ("600001.SH", "20260120", 11, 11, 10, 10, 200000),
+                ("600002.SH", "20260120", 10.2, 10.1, 10, 1, 100000),
+                ("600001.SH", "20260121", 11.7, 11.55, 11, 5, 220000),
+                ("600002.SH", "20260121", 10.1, 9.09, 10.1, -10, 180000),
+            ]
+        )
+        conn.executemany("INSERT INTO daily VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+
+        payload = build_emotion_payload(conn, "20260121", history_limit=5)
+
+        self.assertIsNotNone(payload)
+        self.assertEqual(payload["date"], "20260121")
+        self.assertIn("components", payload)
+        self.assertIn("formula", payload["methodology"])
+        self.assertEqual(payload["feedback"]["sample_count"], 1)
+        self.assertEqual(payload["feedback"]["previous_limit_up_avg_pct"], 5.0)
+        self.assertEqual(payload["limits"]["limit_down"], 1)
+        self.assertLessEqual(len(payload["history"]), 5)
+        self.assertIn(payload["phase_code"], {"ice", "repair", "warming", "climax", "retreat", "divergence"})
         conn.close()
 
 

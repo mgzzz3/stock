@@ -19,9 +19,11 @@ import os
 import re
 import shutil
 import sqlite3
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from pathlib import Path
+from statistics import median
 
 import pandas as pd
 
@@ -479,6 +481,459 @@ def is_stock_limit_up(
         rounding=ROUND_HALF_UP,
     )
     return current == upper_limit
+
+
+def _stock_limit_price(
+    ts_code: str,
+    stock_name: str | None,
+    trade_date: str,
+    pre_close: object,
+    direction: int,
+) -> Decimal | None:
+    if pre_close is None:
+        return None
+    try:
+        previous = Decimal(str(pre_close))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if previous <= 0:
+        return None
+    rate = _price_limit_rate(ts_code, stock_name, trade_date)
+    multiplier = Decimal("1") + rate if direction > 0 else Decimal("1") - rate
+    return (previous * multiplier).quantize(PRICE_TICK, rounding=ROUND_HALF_UP)
+
+
+def is_stock_limit_down(
+    ts_code: str,
+    stock_name: str | None,
+    trade_date: str,
+    pre_close: object,
+    close: object,
+) -> bool:
+    """Return whether the stock closed at its rounded daily lower limit."""
+    limit_price = _stock_limit_price(ts_code, stock_name, trade_date, pre_close, -1)
+    if limit_price is None or close is None:
+        return False
+    try:
+        current = Decimal(str(close)).quantize(PRICE_TICK, rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    return current == limit_price
+
+
+def _clamp(value: float, lower: float = 0.0, upper: float = 100.0) -> float:
+    return max(lower, min(upper, value))
+
+
+def _emotion_phase(score: float, change: float | None) -> tuple[str, str]:
+    delta = change or 0.0
+    if score >= 78:
+        return "climax", "高潮"
+    if score >= 63:
+        return "warming", "升温"
+    if score < 35:
+        return "ice", "冰点"
+    if delta <= -5:
+        return "retreat", "退潮"
+    if delta >= 4:
+        return "repair", "修复"
+    return "divergence", "混沌"
+
+
+def _emotion_summary(point: dict[str, object]) -> str:
+    phase = point["phase"]
+    up_ratio = point["breadth"]["up_ratio_pct"]
+    limit_up = point["limits"]["limit_up"]
+    limit_down = point["limits"]["limit_down"]
+    feedback = point["feedback"]["previous_limit_up_avg_pct"]
+    if phase == "高潮":
+        return f"赚钱效应处于高潮，{up_ratio:.1f}% 个股上涨、{limit_up} 家涨停；强势延续，但追高风险同步抬升。"
+    if phase == "升温":
+        return f"情绪持续升温，涨停 {limit_up} 家、跌停 {limit_down} 家，市场广度与趋势结构共同改善。"
+    if phase == "修复":
+        return f"市场从弱势区修复，上涨家数占比 {up_ratio:.1f}%；先观察修复能否连续两到三日。"
+    if phase == "退潮":
+        suffix = f"，昨日涨停今日平均 {feedback:+.2f}%" if feedback is not None else ""
+        return f"情绪正在退潮，涨停与广度的承接转弱{suffix}；高位股亏钱效应需要优先回避。"
+    if phase == "冰点":
+        return f"情绪接近冰点，仅 {up_ratio:.1f}% 个股上涨、跌停 {limit_down} 家；反弹信号尚未确认。"
+    return f"情绪处于混沌轮动，{up_ratio:.1f}% 个股上涨；局部热点不等于全市场主升。"
+
+
+def _emotion_risk_flags(point: dict[str, object]) -> list[dict[str, str]]:
+    flags: list[dict[str, str]] = []
+    score_change = point.get("score_change")
+    limits = point["limits"]
+    feedback = point["feedback"]
+    activity = point["activity"]
+    breadth = point["breadth"]
+    if score_change is not None and score_change <= -8:
+        flags.append({"level": "danger", "text": f"情绪分单日下降 {abs(score_change):.1f} 分"})
+    if limits["open_board_rate_pct"] >= 30:
+        flags.append({"level": "warning", "text": f"炸板率 {limits['open_board_rate_pct']:.1f}%，分歧偏大"})
+    if feedback["previous_limit_up_avg_pct"] is not None and feedback["previous_limit_up_avg_pct"] < 0:
+        flags.append({"level": "danger", "text": "昨日涨停股平均转亏，接力反馈偏弱"})
+    if limits["limit_up"] >= 30 and breadth["up_ratio_pct"] < 50:
+        flags.append({"level": "warning", "text": "涨停活跃但上涨家数不足，属于局部抱团"})
+    if activity["amount_vs_5d_pct"] is not None and activity["amount_vs_5d_pct"] < -12:
+        flags.append({"level": "warning", "text": "成交额低于近5日均值，增量资金不足"})
+    if not flags:
+        flags.append({"level": "normal", "text": "暂未出现显著退潮信号"})
+    return flags[:3]
+
+
+def _sector_pulses(day_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    groups: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for row in day_rows:
+        industry = str(row.get("industry") or "未分类").strip()
+        groups[industry].append(row)
+
+    pulses = []
+    for industry, rows in groups.items():
+        valid = [row for row in rows if row.get("pct_chg") is not None]
+        if len(valid) < 5:
+            continue
+        avg_pct = sum(float(row["pct_chg"]) for row in valid) / len(valid)
+        up_count = sum(float(row["pct_chg"]) > 0 for row in valid)
+        up_ratio = up_count / len(valid) * 100
+        limit_up_count = sum(bool(row.get("is_limit_up")) for row in valid)
+        amount_billion = sum(float(row.get("amount") or 0) for row in valid) / 100000
+        limit_density = limit_up_count / len(valid) * 100
+        pulse_score = _clamp(35 + avg_pct * 10 + (up_ratio - 50) * 0.45 + limit_density * 1.5)
+        if limit_up_count >= 3 and up_ratio >= 70:
+            quality = "一致爆发"
+        elif avg_pct >= 2 and up_ratio >= 60:
+            quality = "扩散走强"
+        elif limit_up_count >= 2 and up_ratio < 55:
+            quality = "龙头独舞"
+        else:
+            quality = "局部活跃"
+        pulses.append(
+            {
+                "industry": industry,
+                "score": round(pulse_score, 1),
+                "avg_pct": round(avg_pct, 2),
+                "up_ratio_pct": round(up_ratio, 1),
+                "limit_up_count": limit_up_count,
+                "amount_billion": round(amount_billion, 1),
+                "stock_count": len(valid),
+                "quality": quality,
+            }
+        )
+    pulses.sort(key=lambda row: (-row["score"], -row["limit_up_count"], -row["amount_billion"]))
+    return pulses[:10]
+
+
+def _build_emotion_payloads(
+    conn: sqlite3.Connection,
+    requested_dates: list[str],
+    history_limit: int = 30,
+) -> dict[str, dict[str, object]]:
+    """Build explainable sentiment snapshots in one market-data pass."""
+    if not requested_dates:
+        return {}
+    requested_dates = sorted(set(requested_dates))
+    date = requested_dates[-1]
+    conn.row_factory = sqlite3.Row
+    available = [
+        row["trade_date"]
+        for row in conn.execute(
+            "SELECT DISTINCT trade_date FROM daily WHERE trade_date <= ? ORDER BY trade_date DESC LIMIT ?",
+            (date, len(requested_dates) + history_limit + 65),
+        ).fetchall()
+    ]
+    if not available or date not in available:
+        return {}
+    trade_dates = sorted(available)
+    placeholders = ",".join("?" for _ in trade_dates)
+    raw_rows = conn.execute(
+        f"""SELECT d.trade_date, d.ts_code, d.high, d.close, d.pre_close,
+                   d.pct_chg, d.amount, s.name, s.industry
+            FROM daily d
+            LEFT JOIN stock_basic s ON s.ts_code = d.ts_code
+            WHERE d.trade_date IN ({placeholders})
+            ORDER BY d.trade_date, d.ts_code""",
+        trade_dates,
+    ).fetchall()
+    if not raw_rows:
+        return {}
+
+    rows_by_date: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for raw in raw_rows:
+        rows_by_date[raw["trade_date"]].append(dict(raw))
+
+    close_windows: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=20))
+    limit_streaks: dict[str, int] = defaultdict(int)
+    previous_limit_codes: set[str] = set()
+    previous_amounts: deque[float] = deque(maxlen=5)
+    points = []
+    detail_by_date: dict[str, dict[str, object]] = {}
+
+    for trade_date in trade_dates:
+        day_rows = rows_by_date.get(trade_date, [])
+        pct_values = [float(row["pct_chg"]) for row in day_rows if row.get("pct_chg") is not None]
+        if not pct_values:
+            continue
+        current_codes = {str(row["ts_code"]) for row in day_rows}
+        for stale_code in set(limit_streaks) - current_codes:
+            limit_streaks[stale_code] = 0
+        up_count = sum(value > 0 for value in pct_values)
+        down_count = sum(value < 0 for value in pct_values)
+        flat_count = len(pct_values) - up_count - down_count
+        up_ratio = up_count / len(pct_values) * 100
+        median_pct = float(median(pct_values))
+        amount_billion = sum(float(row.get("amount") or 0) for row in day_rows) / 100000
+        amount_vs_5d = (
+            (amount_billion / (sum(previous_amounts) / len(previous_amounts)) - 1) * 100
+            if previous_amounts and sum(previous_amounts) > 0
+            else None
+        )
+
+        limit_up_codes: set[str] = set()
+        limit_up_count = 0
+        limit_down_count = 0
+        touched_limit_count = 0
+        above_ma20_count = 0
+        ma20_eligible = 0
+        new_high_count = 0
+        new_low_count = 0
+        distribution = {"rise_10": 0, "rise_5": 0, "rise": 0, "flat": 0, "fall": 0, "fall_5": 0, "fall_10": 0}
+
+        for row in day_rows:
+            ts_code = str(row["ts_code"])
+            pct_chg = float(row["pct_chg"]) if row.get("pct_chg") is not None else 0.0
+            is_limit_up = is_stock_limit_up(ts_code, row.get("name"), trade_date, row.get("pre_close"), row.get("close"))
+            is_limit_down = is_stock_limit_down(ts_code, row.get("name"), trade_date, row.get("pre_close"), row.get("close"))
+            row["is_limit_up"] = is_limit_up
+            row["is_limit_down"] = is_limit_down
+            if is_limit_up:
+                limit_up_count += 1
+                limit_up_codes.add(ts_code)
+                limit_streaks[ts_code] += 1
+            else:
+                limit_streaks[ts_code] = 0
+            if is_limit_down:
+                limit_down_count += 1
+
+            upper_price = _stock_limit_price(ts_code, row.get("name"), trade_date, row.get("pre_close"), 1)
+            if upper_price is not None and row.get("high") is not None:
+                high = Decimal(str(row["high"])).quantize(PRICE_TICK, rounding=ROUND_HALF_UP)
+                if high >= upper_price:
+                    touched_limit_count += 1
+
+            history = close_windows[ts_code]
+            close = float(row["close"]) if row.get("close") is not None else None
+            if close is not None and len(history) >= 20:
+                ma20_eligible += 1
+                if close > sum(history) / len(history):
+                    above_ma20_count += 1
+                if close > max(history):
+                    new_high_count += 1
+                if close < min(history):
+                    new_low_count += 1
+            if close is not None:
+                history.append(close)
+
+            if pct_chg >= 9.8:
+                distribution["rise_10"] += 1
+            elif pct_chg >= 5:
+                distribution["rise_5"] += 1
+            elif pct_chg > 0:
+                distribution["rise"] += 1
+            elif pct_chg == 0:
+                distribution["flat"] += 1
+            elif pct_chg > -5:
+                distribution["fall"] += 1
+            elif pct_chg > -9.8:
+                distribution["fall_5"] += 1
+            else:
+                distribution["fall_10"] += 1
+
+        feedback_values = [
+            float(row["pct_chg"])
+            for row in day_rows
+            if str(row["ts_code"]) in previous_limit_codes and row.get("pct_chg") is not None
+        ]
+        feedback_avg = sum(feedback_values) / len(feedback_values) if feedback_values else None
+        feedback_positive = (
+            sum(value > 0 for value in feedback_values) / len(feedback_values) * 100
+            if feedback_values
+            else None
+        )
+        open_board_count = max(0, touched_limit_count - limit_up_count)
+        open_board_rate = open_board_count / touched_limit_count * 100 if touched_limit_count else 0.0
+        trend_ratio = above_ma20_count / ma20_eligible * 100 if ma20_eligible else 50.0
+
+        components = {
+            "breadth": round(_clamp(up_ratio), 1),
+            "limit_structure": round(_clamp(50 + (limit_up_count - limit_down_count) * 1.5 - open_board_rate * 0.25), 1),
+            "profit_effect": round(_clamp(50 if feedback_avg is None else 50 + feedback_avg * 6), 1),
+            "trend": round(_clamp(trend_ratio), 1),
+            "activity": round(_clamp(50 if amount_vs_5d is None else 50 + amount_vs_5d), 1),
+        }
+        score = round(
+            components["breadth"] * 0.25
+            + components["limit_structure"] * 0.20
+            + components["profit_effect"] * 0.20
+            + components["trend"] * 0.20
+            + components["activity"] * 0.15,
+            1,
+        )
+        previous_score = points[-1]["score"] if points else None
+        score_change = round(score - previous_score, 1) if previous_score is not None else None
+        phase_code, phase = _emotion_phase(score, score_change)
+        max_streak = max((limit_streaks[code] for code in limit_up_codes), default=0)
+
+        point = {
+            "date": trade_date,
+            "score": score,
+            "score_change": score_change,
+            "phase_code": phase_code,
+            "phase": phase,
+            "breadth": {
+                "up": up_count,
+                "down": down_count,
+                "flat": flat_count,
+                "total": len(pct_values),
+                "up_ratio_pct": round(up_ratio, 1),
+                "median_pct": round(median_pct, 2),
+            },
+            "limits": {
+                "limit_up": limit_up_count,
+                "limit_down": limit_down_count,
+                "touched_limit": touched_limit_count,
+                "open_board": open_board_count,
+                "open_board_rate_pct": round(open_board_rate, 1),
+                "max_streak": max_streak,
+            },
+            "feedback": {
+                "sample_count": len(feedback_values),
+                "previous_limit_up_avg_pct": round(feedback_avg, 2) if feedback_avg is not None else None,
+                "positive_ratio_pct": round(feedback_positive, 1) if feedback_positive is not None else None,
+            },
+            "trend": {
+                "above_ma20_ratio_pct": round(trend_ratio, 1),
+                "new_high_20d": new_high_count,
+                "new_low_20d": new_low_count,
+            },
+            "activity": {
+                "amount_billion": round(amount_billion, 1),
+                "amount_vs_5d_pct": round(amount_vs_5d, 1) if amount_vs_5d is not None else None,
+            },
+            "components": components,
+        }
+        points.append(point)
+
+        leaders = sorted(
+            (
+                {
+                    "ts_code": str(row["ts_code"]),
+                    "name": row.get("name") or str(row["ts_code"]),
+                    "industry": row.get("industry") or "未分类",
+                    "pct_chg": round(float(row.get("pct_chg") or 0), 2),
+                    "amount_billion": round(float(row.get("amount") or 0) / 100000, 2),
+                    "limit_streak": limit_streaks[str(row["ts_code"])],
+                    "status": (
+                        f"{limit_streaks[str(row['ts_code'])]}连板"
+                        if limit_streaks[str(row["ts_code"])] >= 2
+                        else "首板"
+                    ),
+                }
+                for row in day_rows
+                if row.get("is_limit_up")
+            ),
+            key=lambda row: (-row["limit_streak"], -row["amount_billion"], row["ts_code"]),
+        )[:12]
+        detail_by_date[trade_date] = {
+            "distribution": distribution,
+            "leaders": leaders,
+            "sector_pulses": _sector_pulses(day_rows),
+        }
+        previous_limit_codes = limit_up_codes & current_codes
+        previous_amounts.append(amount_billion)
+
+    point_indexes = {point["date"]: index for index, point in enumerate(points)}
+    payloads = {}
+    for requested_date in requested_dates:
+        point_index = point_indexes.get(requested_date)
+        if point_index is None:
+            continue
+        target = points[point_index]
+        detail = detail_by_date[requested_date]
+        target["summary"] = _emotion_summary(target)
+        target["risk_flags"] = _emotion_risk_flags(target)
+        target["distribution"] = detail["distribution"]
+        target["leaders"] = detail["leaders"]
+        target["sector_pulses"] = detail["sector_pulses"]
+        target["methodology"] = {
+            "formula": "市场广度25% + 涨跌停结构20% + 昨涨停反馈20% + 20日趋势20% + 成交活跃度15%",
+            "note": "分数用于描述当日交易情绪，不预测指数涨跌；阶段还结合分数单日变化判定。",
+        }
+        history_start = max(0, point_index - history_limit + 1)
+        target["history"] = [
+            {
+                "date": point["date"],
+                "score": point["score"],
+                "score_change": point["score_change"],
+                "phase": point["phase"],
+                "phase_code": point["phase_code"],
+                "up_ratio_pct": point["breadth"]["up_ratio_pct"],
+                "limit_up": point["limits"]["limit_up"],
+                "limit_down": point["limits"]["limit_down"],
+            }
+            for point in points[history_start : point_index + 1]
+        ]
+        payloads[requested_date] = target
+    return payloads
+
+
+def build_emotion_payload(
+    conn: sqlite3.Connection,
+    date: str,
+    history_limit: int = 30,
+) -> dict[str, object] | None:
+    """Build one explainable whole-market sentiment snapshot."""
+    return _build_emotion_payloads(conn, [date], history_limit).get(date)
+
+
+def export_emotion_data(db_path: Path, output_dir: Path, dates: list[str]) -> dict[str, str]:
+    if not db_path.exists() or not dates:
+        return {}
+    try:
+        with sqlite3.connect(db_path) as conn:
+            index = {}
+            payloads = _build_emotion_payloads(conn, dates)
+            for date, payload in payloads.items():
+                path = output_dir / "emotion" / f"{date}.json"
+                write_json(path, payload)
+                index[date] = f"data/emotion/{date}.json"
+            if index:
+                latest_date = max(index)
+                latest_payload = payloads.get(latest_date)
+                if latest_payload:
+                    write_json(output_dir / "emotion.json", latest_payload)
+            return index
+    except sqlite3.Error:
+        return {}
+
+
+def collect_emotion_codes(db_path: Path, dates: list[str]) -> set[str]:
+    """Return recent liquid limit-up stocks used by the emotion leader table."""
+    if not db_path.exists() or not dates:
+        return set()
+    codes: set[str] = set()
+    try:
+        with sqlite3.connect(db_path) as conn:
+            payloads = _build_emotion_payloads(conn, dates[-30:])
+            for payload in payloads.values():
+                codes.update(
+                    str(stock["ts_code"]).upper()
+                    for stock in payload.get("leaders", [])
+                    if stock.get("ts_code")
+                )
+    except sqlite3.Error:
+        return set()
+    return codes
 
 
 def _build_concept_stock_data(
@@ -983,9 +1438,11 @@ def export_static_data(
     strategy_case_codes = collect_strategy_codes(strategy_payload, cases_only=True)
     mainline_index = export_mainline_data(db_path, output_dir, sorted(grouped))
     concept_index = export_concept_data(db_path, output_dir, sorted(grouped))
+    emotion_index = export_emotion_data(db_path, output_dir, sorted(grouped))
     export_codes = resolve_export_codes(collect_code_values(search_df), db_path)
     export_codes.update(collect_mainline_codes(db_path, sorted(grouped)))
     export_codes.update(collect_concept_codes(db_path, sorted(grouped)))
+    export_codes.update(collect_emotion_codes(db_path, sorted(grouped)))
     export_codes.update(strategy_codes)
     kline_index = export_kline_data(
         export_codes,
@@ -1023,6 +1480,8 @@ def export_static_data(
         "mainline_index": mainline_index,
         "concept_ranking": "data/concept_ranking.json" if concept_index else None,
         "concept_index": concept_index,
+        "emotion": "data/emotion.json" if emotion_index else None,
+        "emotion_index": emotion_index,
         "kline_limit": kline_limit,
         "kline_count": len({path for key, path in kline_index.items() if "." in key}),
         "kline_index": kline_index,

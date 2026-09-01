@@ -13,10 +13,11 @@ const state = {
   dateDataDate: null,
   selectedIndustry: null,
   listFilter: "all",
-  activeTab: "mainline",  // "mainline" | "b1" | "strategy"
+  activeTab: "mainline",  // "mainline" | "emotion" | "b1" | "strategy"
   stockListSource: "b1",  // "b1" | "mainline" | "strategy"
   mainlineData: null,
   conceptData: null,
+  emotionData: null,
   focusStocks: [],
   detailReturnTarget: null,
   detailCase: null,
@@ -91,9 +92,32 @@ const els = {
   focusStockSection: document.querySelector("#focusStockSection"),
   focusStockMeta: document.querySelector("#focusStockMeta"),
   focusStockTableBody: document.querySelector("#focusStockTableBody"),
+  /* Market emotion */
+  emotionSubtitle: document.querySelector("#emotionSubtitle"),
+  emotionPhase: document.querySelector("#emotionPhase"),
+  emotionGauge: document.querySelector("#emotionGauge"),
+  emotionScore: document.querySelector("#emotionScore"),
+  emotionScoreChange: document.querySelector("#emotionScoreChange"),
+  emotionSummary: document.querySelector("#emotionSummary"),
+  emotionFlags: document.querySelector("#emotionFlags"),
+  emotionMethodButton: document.querySelector("#emotionMethodButton"),
+  emotionMethod: document.querySelector("#emotionMethod"),
+  emotionFormula: document.querySelector("#emotionFormula"),
+  emotionMethodNote: document.querySelector("#emotionMethodNote"),
+  emotionKpis: document.querySelector("#emotionKpis"),
+  emotionHistoryMeta: document.querySelector("#emotionHistoryMeta"),
+  emotionChart: document.querySelector("#emotionChart"),
+  emotionComponents: document.querySelector("#emotionComponents"),
+  emotionDistributionMeta: document.querySelector("#emotionDistributionMeta"),
+  emotionDistribution: document.querySelector("#emotionDistribution"),
+  emotionStructure: document.querySelector("#emotionStructure"),
+  emotionSectorBody: document.querySelector("#emotionSectorBody"),
+  emotionLeaderMeta: document.querySelector("#emotionLeaderMeta"),
+  emotionLeaderBody: document.querySelector("#emotionLeaderBody"),
   /* Tabs */
   viewTabs: document.querySelector("#viewTabs"),
   tabMainline: document.querySelector("#tabMainline"),
+  tabEmotion: document.querySelector("#tabEmotion"),
   tabStrategy: document.querySelector("#tabStrategy"),
   stockWorkspace: document.querySelector("#stockWorkspace"),
   /* Strategy decision dashboard */
@@ -132,10 +156,12 @@ const els = {
 
 function syncTabPanels() {
   const showMainlineStockList = state.activeTab === "mainline" && state.stockListSource === "mainline";
+  const showEmotionStockDetail = state.activeTab === "emotion" && state.stockListSource === "emotion";
   const showStrategyStockDetail = state.activeTab === "strategy" && state.stockListSource === "strategy";
   els.tabMainline.hidden = state.activeTab !== "mainline" || showMainlineStockList;
+  els.tabEmotion.hidden = state.activeTab !== "emotion" || showEmotionStockDetail;
   els.tabStrategy.hidden = state.activeTab !== "strategy" || showStrategyStockDetail;
-  els.stockWorkspace.hidden = state.activeTab !== "b1" && !showMainlineStockList && !showStrategyStockDetail;
+  els.stockWorkspace.hidden = state.activeTab !== "b1" && !showMainlineStockList && !showEmotionStockDetail && !showStrategyStockDetail;
 }
 
 const primaryColumns = [
@@ -968,6 +994,14 @@ function backToList() {
   }
   if (state.detailReturnTarget === "focus-stocks") {
     showMainlineDashboard(els.focusStockSection);
+    return;
+  }
+  if (state.detailReturnTarget === "emotion") {
+    state.stockListSource = "b1";
+    state.detailReturnTarget = null;
+    els.detailPanel.hidden = true;
+    syncTabPanels();
+    els.tabEmotion.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
   showListView();
@@ -2153,6 +2187,369 @@ async function loadMainLine(date) {
   }
 }
 
+/* ── Market Emotion Dashboard ── */
+
+const emotionPhaseColors = {
+  ice: "#6f9eb6",
+  repair: "#0f8b8d",
+  warming: "#d98708",
+  climax: "#c44536",
+  retreat: "#65727b",
+  divergence: "#7f6caf",
+};
+
+function formatEmotionNumber(value, digits = 1, suffix = "") {
+  if (value == null || !Number.isFinite(Number(value))) return "--";
+  return `${Number(value).toFixed(digits)}${suffix}`;
+}
+
+function signedEmotionNumber(value, digits = 1, suffix = "") {
+  if (value == null || !Number.isFinite(Number(value))) return "--";
+  const number = Number(value);
+  return `${number > 0 ? "+" : ""}${number.toFixed(digits)}${suffix}`;
+}
+
+function renderEmotionHeader(data) {
+  const score = Number(data.score || 0);
+  const change = data.score_change;
+  els.emotionSubtitle.textContent = `${displayDate(data.date)} · 全市场 ${Number(data.breadth?.total || 0).toLocaleString("zh-CN")} 只股票`;
+  els.emotionPhase.textContent = data.phase || "--";
+  els.emotionPhase.className = `emotion-phase phase-${data.phase_code || "divergence"}`;
+  els.emotionGauge.style.setProperty("--emotion-score", String(Math.max(0, Math.min(100, score))));
+  els.emotionGauge.style.setProperty("--gauge-color", emotionPhaseColors[data.phase_code] || emotionPhaseColors.divergence);
+  els.emotionScore.textContent = score.toFixed(1);
+  els.emotionScoreChange.textContent = signedEmotionNumber(change, 1);
+  els.emotionScoreChange.className = change > 0 ? "score-up" : change < 0 ? "score-down" : "";
+  els.emotionSummary.textContent = data.summary || "暂无情绪判读";
+
+  els.emotionFlags.innerHTML = "";
+  for (const flag of data.risk_flags || []) {
+    const node = document.createElement("span");
+    node.className = `emotion-flag ${flag.level || "normal"}`;
+    node.textContent = flag.text;
+    els.emotionFlags.append(node);
+  }
+  els.emotionFormula.textContent = data.methodology?.formula || "--";
+  els.emotionMethodNote.textContent = data.methodology?.note || "--";
+}
+
+function renderEmotionKpis(data) {
+  const breadth = data.breadth || {};
+  const limits = data.limits || {};
+  const feedback = data.feedback || {};
+  const activity = data.activity || {};
+  const kpis = [
+    ["上涨 / 下跌", `${Number(breadth.up || 0).toLocaleString("zh-CN")} / ${Number(breadth.down || 0).toLocaleString("zh-CN")}`, `上涨占比 ${formatEmotionNumber(breadth.up_ratio_pct, 1, "%")}`],
+    ["涨停 / 跌停", `${limits.limit_up ?? "--"} / ${limits.limit_down ?? "--"}`, `触板 ${limits.touched_limit ?? "--"} 家`],
+    ["炸板率", formatEmotionNumber(limits.open_board_rate_pct, 1, "%"), `${limits.open_board ?? "--"} 家炸板`],
+    ["连板高度", `${limits.max_streak ?? "--"} 板`, "收盘连续涨停"],
+    ["昨日涨停反馈", signedEmotionNumber(feedback.previous_limit_up_avg_pct, 2, "%"), `${feedback.sample_count ?? 0} 家样本 · 红盘 ${formatEmotionNumber(feedback.positive_ratio_pct, 1, "%")}`],
+    ["全市场成交", formatEmotionNumber(activity.amount_billion, 0, " 亿"), `较5日均额 ${signedEmotionNumber(activity.amount_vs_5d_pct, 1, "%")}`],
+  ];
+  els.emotionKpis.innerHTML = "";
+  for (const [label, value, note] of kpis) {
+    const card = document.createElement("article");
+    card.className = "emotion-kpi";
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+    const valueNode = document.createElement("strong");
+    valueNode.textContent = value;
+    const noteNode = document.createElement("small");
+    noteNode.textContent = note;
+    card.append(labelNode, valueNode, noteNode);
+    els.emotionKpis.append(card);
+  }
+}
+
+function renderEmotionChart(history) {
+  const svg = els.emotionChart;
+  svg.innerHTML = "";
+  if (!Array.isArray(history) || history.length === 0) {
+    svg.setAttribute("aria-label", "暂无市场情绪历史数据");
+    const empty = svgNode("text", { x: 380, y: 130, "text-anchor": "middle", class: "emotion-chart-label" });
+    empty.textContent = "暂无历史数据";
+    svg.append(empty);
+    return;
+  }
+
+  const latestPoint = history[history.length - 1];
+  svg.setAttribute("aria-label", `近${history.length}个交易日市场情绪分曲线，当前${latestPoint.phase}，${Number(latestPoint.score).toFixed(1)}分`);
+
+  const width = 760;
+  const height = 260;
+  const margin = { top: 18, right: 18, bottom: 32, left: 38 };
+  const chartWidth = width - margin.left - margin.right;
+  const chartHeight = height - margin.top - margin.bottom;
+  const x = (index) => margin.left + (history.length === 1 ? chartWidth / 2 : index / (history.length - 1) * chartWidth);
+  const y = (score) => margin.top + (100 - Number(score)) / 100 * chartHeight;
+
+  const bands = [
+    [78, 100, "#fff1ef"],
+    [63, 78, "#fff7e8"],
+    [35, 63, "#f4f1fa"],
+    [0, 35, "#eef5f8"],
+  ];
+  for (const [low, high, fill] of bands) {
+    svg.append(svgNode("rect", {
+      x: margin.left,
+      y: y(high),
+      width: chartWidth,
+      height: y(low) - y(high),
+      fill,
+    }));
+  }
+
+  const defs = svgNode("defs");
+  const gradient = svgNode("linearGradient", { id: "emotionAreaGradient", x1: "0", y1: "0", x2: "0", y2: "1" });
+  gradient.append(svgNode("stop", { offset: "0%", "stop-color": "#0f8b8d", "stop-opacity": "0.28" }));
+  gradient.append(svgNode("stop", { offset: "100%", "stop-color": "#0f8b8d", "stop-opacity": "0.02" }));
+  defs.append(gradient);
+  svg.append(defs);
+
+  for (const tick of [0, 25, 50, 75, 100]) {
+    svg.append(svgNode("line", { x1: margin.left, y1: y(tick), x2: width - margin.right, y2: y(tick), class: "emotion-chart-grid" }));
+    const label = svgNode("text", { x: margin.left - 8, y: y(tick) + 3, "text-anchor": "end", class: "emotion-chart-label" });
+    label.textContent = tick;
+    svg.append(label);
+  }
+  for (const threshold of [35, 63, 78]) {
+    svg.append(svgNode("line", { x1: margin.left, y1: y(threshold), x2: width - margin.right, y2: y(threshold), class: "emotion-chart-threshold" }));
+  }
+
+  const points = history.map((item, index) => [x(index), y(item.score)]);
+  const linePath = points.map(([px, py], index) => `${index ? "L" : "M"}${px.toFixed(1)},${py.toFixed(1)}`).join(" ");
+  const areaPath = `${linePath} L${points[points.length - 1][0].toFixed(1)},${y(0).toFixed(1)} L${points[0][0].toFixed(1)},${y(0).toFixed(1)} Z`;
+  svg.append(svgNode("path", { d: areaPath, class: "emotion-chart-area" }));
+  svg.append(svgNode("path", { d: linePath, class: "emotion-chart-line" }));
+
+  history.forEach((item, index) => {
+    const point = svgNode("circle", {
+      cx: x(index),
+      cy: y(item.score),
+      r: index === history.length - 1 ? 5 : 3,
+      class: `emotion-chart-point${index === history.length - 1 ? " current" : ""}`,
+    });
+    const title = svgNode("title");
+    title.textContent = `${displayDate(item.date)} · ${item.phase} · ${Number(item.score).toFixed(1)}分 · 涨停${item.limit_up} / 跌停${item.limit_down}`;
+    point.append(title);
+    svg.append(point);
+  });
+
+  const labelIndexes = [...new Set([0, Math.floor((history.length - 1) / 2), history.length - 1])];
+  for (const index of labelIndexes) {
+    const label = svgNode("text", { x: x(index), y: height - 10, "text-anchor": index === 0 ? "start" : index === history.length - 1 ? "end" : "middle", class: "emotion-chart-label" });
+    label.textContent = displayDate(history[index].date).slice(5);
+    svg.append(label);
+  }
+  els.emotionHistoryMeta.textContent = `${history.length} 个交易日 · 当前 ${Number(history[history.length - 1].score).toFixed(1)} 分`;
+}
+
+function renderEmotionComponents(components) {
+  const rows = [
+    ["breadth", "市场广度", "25%", "#0f8b8d"],
+    ["limit_structure", "涨跌停结构", "20%", "#c44536"],
+    ["profit_effect", "昨日涨停反馈", "20%", "#d98708"],
+    ["trend", "20日趋势", "20%", "#426c9b"],
+    ["activity", "成交活跃度", "15%", "#7f6caf"],
+  ];
+  els.emotionComponents.innerHTML = "";
+  for (const [key, label, weight, color] of rows) {
+    const score = Math.max(0, Math.min(100, Number(components?.[key] ?? 0)));
+    const row = document.createElement("div");
+    const head = document.createElement("div");
+    head.className = "emotion-component-head";
+    const name = document.createElement("strong");
+    name.textContent = label;
+    const meta = document.createElement("span");
+    meta.textContent = `${score.toFixed(1)} · 权重${weight}`;
+    head.append(name, meta);
+    const progress = document.createElement("div");
+    progress.className = "emotion-progress";
+    const bar = document.createElement("span");
+    bar.style.setProperty("--component-score", `${score}%`);
+    bar.style.setProperty("--component-color", color);
+    progress.append(bar);
+    row.append(head, progress);
+    els.emotionComponents.append(row);
+  }
+}
+
+function renderEmotionDistribution(distribution, total) {
+  const rows = [
+    ["rise_10", "涨 ≥ 9.8%", "#bd3d32"],
+    ["rise_5", "涨 5%—9.8%", "#df756a"],
+    ["rise", "涨 0—5%", "#efa8a1"],
+    ["flat", "平盘", "#9aa5ac"],
+    ["fall", "跌 0—5%", "#83c5a6"],
+    ["fall_5", "跌 5%—9.8%", "#4fa57a"],
+    ["fall_10", "跌 ≥ 9.8%", "#24724f"],
+  ];
+  const maxCount = Math.max(1, ...rows.map(([key]) => Number(distribution?.[key] || 0)));
+  els.emotionDistribution.innerHTML = "";
+  for (const [key, label, color] of rows) {
+    const count = Number(distribution?.[key] || 0);
+    const row = document.createElement("div");
+    row.className = "emotion-distribution-row";
+    const labelNode = document.createElement("span");
+    labelNode.textContent = label;
+    const track = document.createElement("div");
+    track.className = "emotion-distribution-track";
+    const bar = document.createElement("i");
+    bar.style.setProperty("--distribution-width", `${count / maxCount * 100}%`);
+    bar.style.setProperty("--distribution-color", color);
+    track.append(bar);
+    const value = document.createElement("strong");
+    value.textContent = count.toLocaleString("zh-CN");
+    row.append(labelNode, track, value);
+    els.emotionDistribution.append(row);
+  }
+  els.emotionDistributionMeta.textContent = `共 ${Number(total || 0).toLocaleString("zh-CN")} 只`;
+}
+
+function renderEmotionStructure(data) {
+  const items = [
+    ["个股中位涨幅", signedEmotionNumber(data.breadth?.median_pct, 2, "%")],
+    ["站上20日均线", formatEmotionNumber(data.trend?.above_ma20_ratio_pct, 1, "%")],
+    ["20日新高 / 新低", `${data.trend?.new_high_20d ?? "--"} / ${data.trend?.new_low_20d ?? "--"}`],
+    ["昨日涨停红盘率", formatEmotionNumber(data.feedback?.positive_ratio_pct, 1, "%")],
+    ["触板 / 封板", `${data.limits?.touched_limit ?? "--"} / ${data.limits?.limit_up ?? "--"}`],
+    ["成交额较5日", signedEmotionNumber(data.activity?.amount_vs_5d_pct, 1, "%")],
+  ];
+  els.emotionStructure.innerHTML = "";
+  for (const [label, value] of items) {
+    const wrapper = document.createElement("div");
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const description = document.createElement("dd");
+    description.textContent = value;
+    wrapper.append(term, description);
+    els.emotionStructure.append(wrapper);
+  }
+}
+
+function renderEmotionSectors(sectors) {
+  els.emotionSectorBody.innerHTML = "";
+  if (!Array.isArray(sectors) || sectors.length === 0) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 7;
+    cell.className = "emotion-empty-cell";
+    cell.textContent = "暂无板块情绪数据";
+    row.append(cell);
+    els.emotionSectorBody.append(row);
+    return;
+  }
+  for (const sector of sectors) {
+    const row = document.createElement("tr");
+    const values = [
+      sector.industry,
+      sector.quality,
+      formatEmotionNumber(sector.score, 1),
+      signedEmotionNumber(sector.avg_pct, 2, "%"),
+      formatEmotionNumber(sector.up_ratio_pct, 1, "%"),
+      sector.limit_up_count,
+      formatEmotionNumber(sector.amount_billion, 1, " 亿"),
+    ];
+    values.forEach((value, index) => {
+      const cell = document.createElement("td");
+      if (index === 1) {
+        const badge = document.createElement("span");
+        const qualityClass = value === "一致爆发" ? "quality-strong" : value === "扩散走强" ? "quality-spread" : value === "龙头独舞" ? "quality-solo" : "";
+        badge.className = `emotion-quality ${qualityClass}`;
+        badge.textContent = value;
+        cell.append(badge);
+      } else {
+        cell.textContent = value;
+      }
+      row.append(cell);
+    });
+    els.emotionSectorBody.append(row);
+  }
+}
+
+function openEmotionLeader(stock) {
+  state.stockListSource = "emotion";
+  showStockDetail(stock.ts_code, stock.name, { returnTarget: "emotion" });
+}
+
+function renderEmotionLeaders(leaders) {
+  els.emotionLeaderBody.innerHTML = "";
+  els.emotionLeaderMeta.textContent = `${leaders?.length || 0} 只 · 按连板和成交额排序`;
+  if (!Array.isArray(leaders) || leaders.length === 0) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 6;
+    cell.className = "emotion-empty-cell";
+    cell.textContent = "当日暂无涨停核心";
+    row.append(cell);
+    els.emotionLeaderBody.append(row);
+    return;
+  }
+  for (const stock of leaders) {
+    const row = document.createElement("tr");
+    const nameCell = document.createElement("td");
+    const nameButton = document.createElement("button");
+    nameButton.type = "button";
+    nameButton.className = "emotion-leader-name";
+    nameButton.textContent = stock.name;
+    nameButton.title = `查看 ${stock.name} 日线`;
+    nameButton.addEventListener("click", () => openEmotionLeader(stock));
+    nameCell.append(nameButton);
+    const values = [stock.ts_code, stock.industry, stock.status, signedEmotionNumber(stock.pct_chg, 2, "%"), formatEmotionNumber(stock.amount_billion, 2, " 亿")];
+    row.append(nameCell);
+    for (const value of values) {
+      const cell = document.createElement("td");
+      cell.textContent = value;
+      row.append(cell);
+    }
+    els.emotionLeaderBody.append(row);
+  }
+}
+
+function renderEmotion(data) {
+  state.emotionData = data;
+  renderEmotionHeader(data);
+  renderEmotionKpis(data);
+  renderEmotionChart(data.history || []);
+  renderEmotionComponents(data.components || {});
+  renderEmotionDistribution(data.distribution || {}, data.breadth?.total);
+  renderEmotionStructure(data);
+  renderEmotionSectors(data.sector_pulses || []);
+  renderEmotionLeaders(data.leaders || []);
+}
+
+function setEmotionError(message) {
+  els.emotionSubtitle.textContent = "情绪数据读取失败";
+  els.emotionPhase.textContent = "--";
+  els.emotionPhase.className = "emotion-phase phase-divergence";
+  els.emotionScore.textContent = "--";
+  els.emotionScoreChange.textContent = "--";
+  els.emotionSummary.textContent = message;
+  els.emotionFlags.innerHTML = "";
+  els.emotionKpis.innerHTML = "";
+  els.emotionChart.innerHTML = "";
+  els.emotionComponents.innerHTML = "";
+  els.emotionDistribution.innerHTML = "";
+  els.emotionStructure.innerHTML = "";
+  renderEmotionSectors([]);
+  renderEmotionLeaders([]);
+}
+
+async function loadEmotion(date) {
+  els.emotionSubtitle.textContent = "加载全市场情绪结构";
+  try {
+    const index = state.manifest?.emotion_index || {};
+    const path = index[date] || state.manifest?.emotion || "data/emotion.json";
+    const data = await fetchJson(path);
+    if (date !== state.selectedDate || state.activeTab !== "emotion") return;
+    if (!data || data.score == null || !data.breadth) throw new Error("情绪数据格式异常");
+    renderEmotion(data);
+  } catch (error) {
+    if (date !== state.selectedDate || state.activeTab !== "emotion") return;
+    setEmotionError(error.message || "暂无情绪数据");
+  }
+}
+
 /* ── Strategy Decision Dashboard ── */
 
 function strategyMetricValue(value, suffix = "") {
@@ -2559,6 +2956,9 @@ function switchTab(tabName, options = {}) {
   } else if (tabName === "strategy" && state.stockListSource === "strategy") {
     state.stockListSource = "b1";
     state.detailCase = null;
+  } else if (tabName === "emotion" && state.stockListSource === "emotion") {
+    state.stockListSource = "b1";
+    state.detailReturnTarget = null;
   }
 
   // Update tab buttons
@@ -2573,6 +2973,8 @@ function switchTab(tabName, options = {}) {
   // Update subtitle
   if (tabName === "mainline") {
     els.subtitle.textContent = `主线监控 · ${displayDate(state.selectedDate)}`;
+  } else if (tabName === "emotion") {
+    els.subtitle.textContent = `市场情绪 · ${displayDate(state.selectedDate)}`;
   } else if (tabName === "b1") {
     els.subtitle.textContent = `B1 信号 · ${displayDate(state.selectedDate)}`;
   } else {
@@ -2586,6 +2988,10 @@ function switchTab(tabName, options = {}) {
     state.stockListSource = "b1";
     syncTabPanels();
     loadMainLine(state.selectedDate);
+  } else if (tabName === "emotion") {
+    state.stockListSource = "b1";
+    syncTabPanels();
+    loadEmotion(state.selectedDate);
   } else if (tabName === "strategy") {
     loadStrategies();
   } else if (state.dateDataDate !== state.selectedDate) {
@@ -2616,6 +3022,11 @@ async function onDateSelect(date) {
     syncTabPanels();
     els.subtitle.textContent = `主线监控 · ${displayDate(date)}`;
     loadMainLine(date);
+  } else if (state.activeTab === "emotion") {
+    els.detailPanel.hidden = true;
+    syncTabPanels();
+    els.subtitle.textContent = `市场情绪 · ${displayDate(date)}`;
+    loadEmotion(date);
   } else {
     syncTabPanels();
     loadDate(date);
@@ -2665,6 +3076,12 @@ function setStrategyCurveMode(mode) {
 
 els.strategyWalkForwardMode.addEventListener("click", () => setStrategyCurveMode("walk_forward"));
 els.strategyFullSampleMode.addEventListener("click", () => setStrategyCurveMode("full_sample"));
+
+els.emotionMethodButton.addEventListener("click", () => {
+  const expanded = els.emotionMethodButton.getAttribute("aria-expanded") === "true";
+  els.emotionMethodButton.setAttribute("aria-expanded", String(!expanded));
+  els.emotionMethod.hidden = expanded;
+});
 
 els.predictionOnly.addEventListener("click", () => applyListFilter("predictions"));
 els.showAllStocks.addEventListener("click", () => applyListFilter("all"));
