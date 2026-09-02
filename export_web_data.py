@@ -582,7 +582,11 @@ def _emotion_risk_flags(point: dict[str, object]) -> list[dict[str, str]]:
     return flags[:3]
 
 
-def _sector_pulses(day_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+def _sector_pulses(
+    day_rows: list[dict[str, object]],
+    limit_streaks: dict[str, int] | None = None,
+    stock_limit: int = 12,
+) -> list[dict[str, object]]:
     groups: dict[str, list[dict[str, object]]] = defaultdict(list)
     for row in day_rows:
         industry = str(row.get("industry") or "未分类").strip()
@@ -608,6 +612,30 @@ def _sector_pulses(day_rows: list[dict[str, object]]) -> list[dict[str, object]]
             quality = "龙头独舞"
         else:
             quality = "局部活跃"
+        top_stocks = sorted(
+            valid,
+            key=lambda row: (
+                not bool(row.get("is_limit_up")),
+                -float(row.get("pct_chg") or 0),
+                -float(row.get("amount") or 0),
+                str(row["ts_code"]),
+            ),
+        )[:stock_limit]
+        stocks = []
+        for row in top_stocks:
+            ts_code = str(row["ts_code"])
+            is_limit_up = bool(row.get("is_limit_up"))
+            streak = int((limit_streaks or {}).get(ts_code, 0))
+            stocks.append(
+                {
+                    "ts_code": ts_code,
+                    "name": row.get("name") or ts_code,
+                    "pct_chg": round(float(row.get("pct_chg") or 0), 2),
+                    "amount_billion": round(float(row.get("amount") or 0) / 100000, 2),
+                    "limit_streak": streak if is_limit_up else 0,
+                    "status": (f"{streak}连板" if streak >= 2 else "首板") if is_limit_up else None,
+                }
+            )
         pulses.append(
             {
                 "industry": industry,
@@ -618,6 +646,7 @@ def _sector_pulses(day_rows: list[dict[str, object]]) -> list[dict[str, object]]
                 "amount_billion": round(amount_billion, 1),
                 "stock_count": len(valid),
                 "quality": quality,
+                "stocks": stocks,
             }
         )
     pulses.sort(key=lambda row: (-row["score"], -row["limit_up_count"], -row["amount_billion"]))
@@ -847,7 +876,7 @@ def _build_emotion_payloads(
         detail_by_date[trade_date] = {
             "distribution": distribution,
             "leaders": leaders,
-            "sector_pulses": _sector_pulses(day_rows),
+            "sector_pulses": _sector_pulses(day_rows, limit_streaks),
         }
         previous_limit_codes = limit_up_codes & current_codes
         previous_amounts.append(amount_billion)
@@ -918,7 +947,7 @@ def export_emotion_data(db_path: Path, output_dir: Path, dates: list[str]) -> di
 
 
 def collect_emotion_codes(db_path: Path, dates: list[str]) -> set[str]:
-    """Return recent liquid limit-up stocks used by the emotion leader table."""
+    """Return stocks used by the emotion leader table and sector themes."""
     if not db_path.exists() or not dates:
         return set()
     codes: set[str] = set()
@@ -931,6 +960,12 @@ def collect_emotion_codes(db_path: Path, dates: list[str]) -> set[str]:
                     for stock in payload.get("leaders", [])
                     if stock.get("ts_code")
                 )
+                for sector in payload.get("sector_pulses", []):
+                    codes.update(
+                        str(stock["ts_code"]).upper()
+                        for stock in sector.get("stocks", [])
+                        if stock.get("ts_code")
+                    )
     except sqlite3.Error:
         return set()
     return codes

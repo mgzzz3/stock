@@ -2038,6 +2038,70 @@ td[data-col="bull_bear"] {
   outline: none;
 }
 
+.emotion-sector-name {
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  cursor: pointer;
+  padding: 8px 0;
+  font-weight: 750;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  text-decoration: none;
+}
+
+.emotion-sector-name::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 5px solid currentColor;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.15s ease;
+}
+
+.emotion-sector-name[aria-expanded="true"]::before {
+  transform: rotate(90deg);
+}
+
+.emotion-sector-name:hover,
+.emotion-sector-name:focus-visible {
+  color: var(--danger);
+  text-decoration: underline;
+  outline: none;
+}
+
+.emotion-sector-expanded-row > td {
+  border-bottom: 0;
+}
+
+.emotion-sector-detail-row > td {
+  padding: 0 8px 14px !important;
+  background: #fafcfc;
+}
+
+.emotion-sector-detail-row:hover > td {
+  background: #fafcfc;
+}
+
+.emotion-sector-stocks-meta {
+  margin: 10px 2px 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: left;
+}
+
+.emotion-sector-stocks {
+  min-width: 600px;
+}
+
+.emotion-sector-stocks th,
+.emotion-sector-stocks td {
+  padding: 8px 10px;
+}
+
 .emotion-empty-cell {
   padding: 24px !important;
   color: var(--muted);

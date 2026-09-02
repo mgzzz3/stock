@@ -282,6 +282,63 @@ class EmotionPayloadTests(unittest.TestCase):
         self.assertIn(payload["phase_code"], {"ice", "repair", "warming", "climax", "retreat", "divergence"})
         conn.close()
 
+    def test_sector_pulses_include_member_stocks_with_limit_up_first(self):
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(
+            """
+            CREATE TABLE stock_basic (ts_code TEXT, name TEXT, industry TEXT);
+            CREATE TABLE daily (
+                ts_code TEXT, trade_date TEXT, high REAL, close REAL,
+                pre_close REAL, pct_chg REAL, amount REAL
+            );
+            """
+        )
+        stocks = [
+            ("600001.SH", "龙头股"),
+            ("600002.SH", "强势股"),
+            ("600003.SH", "跟随股"),
+            ("600004.SH", "弱势股"),
+            ("600005.SH", "平盘股"),
+        ]
+        conn.executemany(
+            "INSERT INTO stock_basic VALUES (?, ?, '种植业')",
+            stocks,
+        )
+        rows = []
+        for day in range(1, 21):
+            trade_date = f"202601{day:02d}"
+            for code, _ in stocks:
+                rows.append((code, trade_date, 10, 10, 10, 0, 100000))
+        rows.extend(
+            [
+                ("600001.SH", "20260121", 11, 11, 10, 10, 500000),
+                ("600002.SH", "20260121", 10.7, 10.7, 10, 7, 300000),
+                ("600003.SH", "20260121", 10.3, 10.3, 10, 3, 200000),
+                ("600004.SH", "20260121", 9.8, 9.8, 10, -2, 150000),
+                ("600005.SH", "20260121", 10, 10, 10, 0, 100000),
+            ]
+        )
+        conn.executemany("INSERT INTO daily VALUES (?, ?, ?, ?, ?, ?, ?)", rows)
+
+        payload = build_emotion_payload(conn, "20260121", history_limit=5)
+
+        self.assertIsNotNone(payload)
+        pulses = payload["sector_pulses"]
+        self.assertEqual(len(pulses), 1)
+        self.assertEqual(pulses[0]["industry"], "种植业")
+        members = pulses[0]["stocks"]
+        self.assertEqual(
+            [stock["ts_code"] for stock in members],
+            ["600001.SH", "600002.SH", "600003.SH", "600005.SH", "600004.SH"],
+        )
+        self.assertEqual(members[0]["name"], "龙头股")
+        self.assertEqual(members[0]["status"], "首板")
+        self.assertEqual(members[0]["limit_streak"], 1)
+        self.assertEqual(members[1]["status"], None)
+        self.assertEqual(members[1]["limit_streak"], 0)
+        self.assertAlmostEqual(members[0]["amount_billion"], 5.0)
+        conn.close()
+
 
 if __name__ == "__main__":
     unittest.main()

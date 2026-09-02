@@ -15,6 +15,7 @@ const state = {
   listFilter: "all",
   activeTab: "mainline",  // "mainline" | "emotion" | "b1" | "strategy"
   stockListSource: "b1",  // "b1" | "mainline" | "strategy"
+  emotionExpandedSector: null,
   mainlineData: null,
   conceptData: null,
   emotionData: null,
@@ -2427,6 +2428,69 @@ function renderEmotionStructure(data) {
   }
 }
 
+function renderEmotionSectorStocks(sector) {
+  const row = document.createElement("tr");
+  row.className = "emotion-sector-detail-row";
+  const cell = document.createElement("td");
+  cell.colSpan = 7;
+  const stocks = Array.isArray(sector.stocks) ? sector.stocks : [];
+  const meta = document.createElement("div");
+  meta.className = "emotion-sector-stocks-meta";
+  meta.textContent = stocks.length
+    ? `${sector.industry} · 共 ${sector.stock_count ?? stocks.length} 只成分股 · 涨停 ${sector.limit_up_count ?? 0} 家`
+    : `${sector.industry} · 暂无成分股明细`;
+
+  const table = document.createElement("table");
+  table.className = "emotion-table emotion-sector-stocks";
+  table.id = "emotionSectorStocks";
+  const headRow = document.createElement("tr");
+  for (const label of ["股票", "代码", "涨幅", "状态", "成交额"]) {
+    const th = document.createElement("th");
+    th.textContent = label;
+    headRow.append(th);
+  }
+  const thead = document.createElement("thead");
+  thead.append(headRow);
+  const tbody = document.createElement("tbody");
+  if (!stocks.length) {
+    const emptyRow = document.createElement("tr");
+    const emptyCell = document.createElement("td");
+    emptyCell.colSpan = 5;
+    emptyCell.className = "emotion-empty-cell";
+    emptyCell.textContent = "该主题暂无成分股数据，请重新运行导出";
+    emptyRow.append(emptyCell);
+    tbody.append(emptyRow);
+  }
+  for (const stock of stocks) {
+    const stockRow = document.createElement("tr");
+    const nameCell = document.createElement("td");
+    const nameButton = document.createElement("button");
+    nameButton.type = "button";
+    nameButton.className = "emotion-leader-name";
+    nameButton.textContent = stock.name;
+    nameButton.title = `查看 ${stock.name} 日线`;
+    nameButton.addEventListener("click", () => openEmotionLeader(stock));
+    nameCell.append(nameButton);
+    stockRow.append(nameCell);
+    const values = [
+      stock.ts_code,
+      signedEmotionNumber(stock.pct_chg, 2, "%"),
+      stock.status || "--",
+      formatEmotionNumber(stock.amount_billion, 2, " 亿"),
+    ];
+    for (const value of values) {
+      const valueCell = document.createElement("td");
+      valueCell.textContent = value;
+      stockRow.append(valueCell);
+    }
+    tbody.append(stockRow);
+  }
+  table.append(thead, tbody);
+  cell.append(meta, table);
+  row.append(cell);
+  return row;
+}
+
 function renderEmotionSectors(sectors) {
   els.emotionSectorBody.innerHTML = "";
   if (!Array.isArray(sectors) || sectors.length === 0) {
@@ -2441,29 +2505,50 @@ function renderEmotionSectors(sectors) {
   }
   for (const sector of sectors) {
     const row = document.createElement("tr");
+    const expanded = state.emotionExpandedSector === sector.industry;
+    if (expanded) {
+      row.className = "emotion-sector-expanded-row";
+    }
+
+    const nameCell = document.createElement("td");
+    const nameButton = document.createElement("button");
+    nameButton.type = "button";
+    nameButton.className = "emotion-sector-name";
+    nameButton.setAttribute("aria-expanded", String(expanded));
+    nameButton.setAttribute("aria-controls", "emotionSectorStocks");
+    nameButton.textContent = sector.industry;
+    nameButton.title = expanded ? `收起 ${sector.industry} 股票列表` : `展开 ${sector.industry} 股票列表`;
+    nameButton.addEventListener("click", () => {
+      state.emotionExpandedSector = expanded ? null : sector.industry;
+      renderEmotionSectors(sectors);
+    });
+    nameCell.append(nameButton);
+    row.append(nameCell);
+
+    const qualityCell = document.createElement("td");
+    const badge = document.createElement("span");
+    const qualityClass = sector.quality === "一致爆发" ? "quality-strong" : sector.quality === "扩散走强" ? "quality-spread" : sector.quality === "龙头独舞" ? "quality-solo" : "";
+    badge.className = `emotion-quality ${qualityClass}`;
+    badge.textContent = sector.quality;
+    qualityCell.append(badge);
+    row.append(qualityCell);
+
     const values = [
-      sector.industry,
-      sector.quality,
       formatEmotionNumber(sector.score, 1),
       signedEmotionNumber(sector.avg_pct, 2, "%"),
       formatEmotionNumber(sector.up_ratio_pct, 1, "%"),
       sector.limit_up_count,
       formatEmotionNumber(sector.amount_billion, 1, " 亿"),
     ];
-    values.forEach((value, index) => {
+    for (const value of values) {
       const cell = document.createElement("td");
-      if (index === 1) {
-        const badge = document.createElement("span");
-        const qualityClass = value === "一致爆发" ? "quality-strong" : value === "扩散走强" ? "quality-spread" : value === "龙头独舞" ? "quality-solo" : "";
-        badge.className = `emotion-quality ${qualityClass}`;
-        badge.textContent = value;
-        cell.append(badge);
-      } else {
-        cell.textContent = value;
-      }
+      cell.textContent = value;
       row.append(cell);
-    });
+    }
     els.emotionSectorBody.append(row);
+    if (expanded) {
+      els.emotionSectorBody.append(renderEmotionSectorStocks(sector));
+    }
   }
 }
 
