@@ -133,6 +133,7 @@ const els = {
   strategyEvidence: document.querySelector("#strategyEvidence"),
   strategyMetrics: document.querySelector("#strategyMetrics"),
   strategyCredibilityLevel: document.querySelector("#strategyCredibilityLevel"),
+  strategyCredibilityIntro: document.querySelector("#strategyCredibilityIntro"),
   strategyCredibilityGrid: document.querySelector("#strategyCredibilityGrid"),
   strategyCredibilityNote: document.querySelector("#strategyCredibilityNote"),
   strategyCurve: document.querySelector("#strategyCurve"),
@@ -2675,8 +2676,12 @@ function renderStrategyCards(strategies) {
     const walkForwardMetrics = strategy.walk_forward?.metrics || {};
     const metricRows = [
       ["净单笔", strategyMetricValue(strategy.metrics?.net_mean_return_pct, "%")],
-      ["基准超额", strategyMetricValue(strategy.metrics?.excess_return_pct, "%")],
-      ["滚动回撤", strategyMetricValue(walkForwardMetrics.max_drawdown_pct, "%")],
+      strategy.execution_mode === "portfolio_simulation"
+        ? ["模拟总收益", strategyMetricValue(strategy.metrics?.total_return_pct, "%")]
+        : ["基准超额", strategyMetricValue(strategy.metrics?.excess_return_pct, "%")],
+      strategy.execution_mode === "portfolio_simulation"
+        ? ["模拟回撤", strategyMetricValue(strategy.metrics?.max_drawdown_pct, "%")]
+        : ["滚动回撤", strategyMetricValue(walkForwardMetrics.max_drawdown_pct, "%")],
     ];
     for (const [label, value] of metricRows) {
       const item = document.createElement("span");
@@ -2696,7 +2701,14 @@ function renderStrategyMetrics(strategy) {
   const metrics = strategy.metrics || {};
   const walkForward = strategy.walk_forward?.metrics || {};
   els.strategyMetrics.innerHTML = "";
-  const items = [
+  const items = strategy.execution_mode === "portfolio_simulation" ? [
+    ["模拟最大回撤", strategyMetricValue(metrics.max_drawdown_pct, "%"), "现金与持仓逐日净值"],
+    ["模拟总收益", strategyMetricValue(metrics.total_return_pct, "%"), `净值 ${metrics.latest_nav ?? "--"}`],
+    ["当前持仓", `${strategy.portfolio?.holdings?.length ?? 0}/3`, "无固定到期日"],
+    ["次日待补仓", `${strategy.portfolio?.pending_buys?.length ?? 0}`, "当日预测 · 次日开盘"],
+    ["已完成净单笔", strategyMetricValue(metrics.net_mean_return_pct, "%"), "仅已卖出交易，扣除成本"],
+    ["已完成胜率", strategyMetricValue(metrics.win_rate_pct, "%"), `${metrics.signal_count ?? 0} 笔已卖出交易`],
+  ] : [
     ["滚动最大回撤", strategyMetricValue(walkForward.max_drawdown_pct, "%"), "样本外逐日净值"],
     ["滚动总收益", strategyMetricValue(walkForward.total_return_pct, "%"), `净值 ${walkForward.latest_nav ?? "--"}`],
     ["启用窗口", `${walkForward.enabled_windows ?? 0}/${walkForward.total_windows ?? 0}`, walkForward.latest_approved ? "最近窗口通过" : "最近窗口未通过"],
@@ -2719,7 +2731,10 @@ function renderStrategyMetrics(strategy) {
 }
 
 function renderStrategyCurve(strategy) {
-  const useWalkForward = state.strategyCurveMode === "walk_forward";
+  const simulation = strategy.execution_mode === "portfolio_simulation";
+  const useWalkForward = !simulation && state.strategyCurveMode === "walk_forward";
+  els.strategyWalkForwardMode.hidden = simulation;
+  els.strategyFullSampleMode.textContent = simulation ? "规则模拟" : "全量参考";
   const walkForward = strategy.walk_forward || {};
   const points = useWalkForward
     ? (Array.isArray(walkForward.curve) ? walkForward.curve : [])
@@ -2792,7 +2807,7 @@ function renderStrategyCurve(strategy) {
   }
 
   const maxDrawdown = curveMetrics.max_drawdown_pct;
-  const prefix = useWalkForward ? "样本外" : "全量";
+  const prefix = simulation ? "规则模拟" : (useWalkForward ? "样本外" : "全量");
   els.strategyCurveMeta.textContent = `${prefix} ${points.length} 日 · 最大回撤 ${strategyMetricValue(maxDrawdown, "%")}`;
 }
 
@@ -2806,7 +2821,9 @@ function renderStrategyRules(strategy) {
     ? `${displayDate(latestWindow.training_start)}—${displayDate(latestWindow.training_end)}：净单笔 ${strategyMetricValue(latestWindow.training_net_mean_return_pct, "%")}、超额 ${strategyMetricValue(latestWindow.training_excess_return_pct, "%")}、胜率 ${strategyMetricValue(latestWindow.training_win_rate_pct, "%")}，${latestWindow.approved ? "门控通过" : "门控未通过"}`
     : "滚动训练数据不足";
   const rules = [
-    ["滚动", gateSummary],
+    strategy.execution_mode === "portfolio_simulation"
+      ? ["模式", "用户自定义规则模拟，不添加滚动门控；不是实盘账户持仓。"]
+      : ["滚动", gateSummary],
     ["买入", strategy.signal_rule],
     ["退出", strategy.exit_rule],
     ["仓位", strategy.position_rule],
@@ -2834,9 +2851,19 @@ function renderStrategyRules(strategy) {
 
 function renderStrategyCredibility(strategy) {
   const credibility = strategy.credibility || {};
+  els.strategyCredibilityIntro.textContent = strategy.execution_mode === "portfolio_simulation"
+    ? "存档预测重放不等于前瞻验证；未平仓不计入已完成交易统计。"
+    : "信号数量不等于独立样本，优先看滚动样本外交易与有效窗口。";
   els.strategyCredibilityLevel.textContent = credibility.evidence_label || "数据不足";
   els.strategyCredibilityGrid.innerHTML = "";
-  const items = [
+  const items = strategy.execution_mode === "portfolio_simulation" ? [
+    ["存档起始", displayDate(strategy.metrics?.period_start)],
+    ["完成交易", String(credibility.completed_trade_count ?? 0)],
+    ["涉及股票", String(credibility.unique_stock_count ?? 0)],
+    ["存档日期", String(credibility.signal_date_count ?? 0)],
+    ["验证方式", "存档规则重放"],
+    ["滚动门控", "不适用"],
+  ] : [
     ["回测历史", credibility.history_years == null ? "--" : `${Number(credibility.history_years).toFixed(1)} 年`],
     ["完成交易", credibility.completed_trade_count == null ? "--" : Number(credibility.completed_trade_count).toLocaleString("zh-CN")],
     ["涉及股票", credibility.unique_stock_count == null ? "--" : Number(credibility.unique_stock_count).toLocaleString("zh-CN")],

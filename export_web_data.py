@@ -1468,6 +1468,7 @@ def export_static_data(
     strategy_payload = build_strategy_dashboard(
         db_path,
         date_entries[0]["date"] if date_entries else None,
+        data_dir=data_dir,
     )
     strategy_codes = collect_strategy_codes(strategy_payload)
     strategy_case_codes = collect_strategy_codes(strategy_payload, cases_only=True)
@@ -1530,6 +1531,8 @@ def export_strategy_assets(
     output_dir: Path,
     db_path: Path = DEFAULT_DB_PATH,
     kline_limit: int = 120,
+    *,
+    data_dir: Path | None = None,
 ) -> dict[str, object]:
     """Refresh strategy assets without rewriting unrelated generated files."""
     output_dir = output_dir.resolve()
@@ -1539,7 +1542,7 @@ def export_strategy_assets(
         raise FileNotFoundError("manifest.json is missing; run a full web export first")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-    strategy_payload = build_strategy_dashboard(db_path, manifest.get("latest_date"))
+    strategy_payload = build_strategy_dashboard(db_path, manifest.get("latest_date"), data_dir=data_dir)
     strategy_codes = collect_strategy_codes(strategy_payload)
     strategy_case_codes = collect_strategy_codes(strategy_payload, cases_only=True)
     signal_dates = dict(manifest.get("signal_dates") or {})
@@ -1572,7 +1575,7 @@ def export_strategy_assets(
 def main() -> int:
     args = parse_args()
     if args.strategies_only:
-        manifest = export_strategy_assets(args.output_dir, args.db_path, args.kline_limit)
+        manifest = export_strategy_assets(args.output_dir, args.db_path, args.kline_limit, data_dir=args.data_dir)
         print(f"Strategies refreshed: {manifest['strategies']}")
         print(f"K-line files indexed: {manifest['kline_count']}")
         return 0

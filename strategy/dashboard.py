@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from strategy import r1_reversal, technical_expansion, value_quality
+from strategy import r1_reversal, technical_expansion, value_quality, zb1
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1127,6 +1127,8 @@ def _cohort_period_metrics(
 def build_strategy_dashboard(
     db_path: Path | str = DEFAULT_DB_PATH,
     as_of_date: str | None = None,
+    *,
+    data_dir: Path | None = None,
 ) -> dict[str, object]:
     """Compute strategy metrics, drawdown curves and the current stock list."""
     db_path = Path(db_path)
@@ -2069,6 +2071,8 @@ def build_strategy_dashboard(
         },
     ]
 
+    strategies.append(zb1.build_strategy(db_path, as_of_date, data_dir))
+
     active_recommendations = sum(
         len(strategy["recommendations"])
         for strategy in strategies
@@ -2085,7 +2089,7 @@ def build_strategy_dashboard(
             "retired_strategy_count": sum(s["status"] == "retired" for s in strategies),
             "active_recommendation_count": active_recommendations,
         },
-        "risk_notice": "策略是否允许下单由 252 日训练、21 日样本外测试的滚动门控决定；训练交易必须在测试前完成退出。滚动通过也不代表保证盈利。",
+        "risk_notice": "研究策略按252日训练、21日样本外测试的滚动门控验证；ZB1按用户自定义规则独立模拟，不受该门控限制，也不代表已通过验证。页面不连接实盘下单，历史结果不保证未来盈利。",
         "strategies": strategies,
     }
 
