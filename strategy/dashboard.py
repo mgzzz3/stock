@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from strategy import r1_reversal, technical_expansion, value_quality, zb1
+from strategy import emotion, r1_reversal, technical_expansion, value_quality, zb1
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1153,6 +1153,8 @@ def build_strategy_dashboard(
         if not as_of_date:
             return empty_payload
 
+        emotion_strategies = emotion.build_strategies(db_path, as_of_date)
+
         scan_start = _shift_date(as_of_date, -BACKTEST_CALENDAR_DAYS)
         load_start = _shift_date(scan_start, -WARMUP_CALENDAR_DAYS)
         daily = pd.read_sql_query(
@@ -2071,6 +2073,7 @@ def build_strategy_dashboard(
         },
     ]
 
+    strategies.extend(emotion_strategies)
     strategies.append(zb1.build_strategy(db_path, as_of_date, data_dir))
 
     active_recommendations = sum(
