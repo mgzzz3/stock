@@ -35,6 +35,20 @@ def price_fixture(days=120, stocks=4):
 
 
 class EmotionTests(unittest.TestCase):
+    def test_validation_status_retires_a_well_sampled_failed_rule(self):
+        self.assertEqual(
+            emotion.validation_status(20, False),
+            ("retired", "长期样本未通过"),
+        )
+        self.assertEqual(
+            emotion.validation_status(19, False),
+            ("watch", "样本外证据不足"),
+        )
+        self.assertEqual(
+            emotion.validation_status(20, True),
+            ("watch", "历史初验通过"),
+        )
+
     def test_cash_slots_fees_and_t_plus_one(self):
         m = market_fixture()
         m.values['adj_open'][6, 0] = 1.1

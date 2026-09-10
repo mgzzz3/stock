@@ -236,6 +236,15 @@ def pct_mean(values) -> float | None:
     return round(float(np.mean(values)) * 100, 3) if len(values) else None
 
 
+def validation_status(paired_cohorts: int, supported: bool) -> tuple[str, str]:
+    """Separate a disproved rule from one that merely lacks observations."""
+    if supported:
+        return "watch", "历史初验通过"
+    if paired_cohorts >= 20:
+        return "retired", "长期样本未通过"
+    return "watch", "样本外证据不足"
+
+
 def evidence(cohorts: list[dict], curve: list[dict]) -> dict:
     completed = [c for c in cohorts if c["complete"] and c["trades"]]
     trades = [t for c in cohorts for t in c["trades"] if t["net"] is not None]
@@ -326,7 +335,9 @@ def build_from_market(m: Market) -> list[dict]:
         supported = bool(oos_metrics["paired_cohort_count"] >= 20 and ci and ci[0] > 0
                          and (oos_metrics["total_return_pct"] or 0) > 0
                          and (stress_metrics["total_return_pct"] or 0) > 0)
-        label = "历史初验通过" if supported else ("样本外证据不足" if oos_metrics["paired_cohort_count"] < 20 else "样本外未通过")
+        status, label = validation_status(
+            oos_metrics["paired_cohort_count"], supported
+        )
         raw_allowed = np.arange(len(m.dates)) >= TRAIN_DAYS
         raw_oos, raw_curve = simulate(m, candidates, raw_allowed)
         attach_baselines(m, raw_oos, baseline_cache)
@@ -351,7 +362,7 @@ def build_from_market(m: Market) -> list[dict]:
                       "completed_oos_signal_count": oos_metrics["signal_count"],
                       "oos_signal_count": sum(len(c["trades"]) for c in oos),
                       "oos_mean_return_pct": oos_metrics["net_mean_return_pct"],
-                      "latest_approved": bool(allowed[-1])}
+                      "latest_approved": bool(supported and allowed[-1])}
         ci_text = f"{ci[0]:.2f}%～{ci[1]:.2f}%" if ci else "样本不足"
         evidence_text = (f"滚动样本外完成 {oos_metrics['cohort_count']} 个不重叠组合、{oos_metrics['signal_count']} 笔交易；"
                          f"组合平均超额 {oos_metrics['excess_return_pct']}%，四策略多重检验校正区间 {ci_text}。"
@@ -359,7 +370,7 @@ def build_from_market(m: Market) -> list[dict]:
                          f"高成本情景（往返约0.50%）滚动总收益 {stress_metrics['total_return_pct']}%。")
         method = "收盘信号、次日开盘建仓；10个固定资金槽、每槽10%，不足或跳过保留现金；持有5个完整交易日后开盘退出，受限顺延；按持股与现金逐日计价，买卖各0.10%成本。"
         result.append({"id": strategy_id, "name": name, "short_name": name, "category": "emotion",
-                       "status": "watch", "status_label": label, "confidence": "历史研究",
+                       "status": status, "status_label": label, "confidence": "历史研究",
                        "thesis": thesis, "evidence": evidence_text,
                        "signal_rule": rule + "统一要求有60根有效日线、股价≥2元、20日均成交额≥1亿元；每日最多10只：E1按5日跌幅、E2/E3按20日收益、E4按缩量程度优先；同分按成交额降序、代码升序。",
                        "exit_rule": "次日开盘价相对当日行情pre_close（除权参考价）在±3%内且有成交才买入；第6个后续交易日开盘卖出。缺行情/停牌或开盘跌幅≥4.8%则延迟，未退出继续计价。",

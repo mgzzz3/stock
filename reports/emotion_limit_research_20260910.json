@@ -1,0 +1,206 @@
+{
+  "generated_at": "2026-09-10T01:48:32.373416+00:00",
+  "source_sha256": "74ef4e27e44353a35b9a276bfb6c04f296a12bf27f89d4c29147cf1a0fdd5d83",
+  "method": {
+    "signal_source": "Tushare daily close/pre_close; liquid SSE/SZSE main board",
+    "limit_proxy": "pct_chg >= 9.8% or <= -9.8%; first 60 valid bars excluded",
+    "execution": "close signal, next open, 10 equal cash slots, five complete sessions, 0.10% each side",
+    "benchmark": "same-date liquid eligible pool with identical execution",
+    "partitions": {
+      "development_2015_2020": [
+        "20150101",
+        "20201231"
+      ],
+      "validation_2021_2023": [
+        "20210101",
+        "20231231"
+      ],
+      "holdout_2024_2026": [
+        "20240101",
+        "20261231"
+      ]
+    },
+    "selection_policy": "four hypotheses fixed before reading their partition results"
+  },
+  "data_audit": {
+    "period_start": "20150105",
+    "period_end": "20260909",
+    "trading_days": 2841,
+    "row_count": 11714778,
+    "stock_count": 5818,
+    "archive_sessions": 2274,
+    "sqlite_sessions": 567,
+    "calendar_missing_sessions": [],
+    "calendar_source": "https://finance.sina.com.cn/realstock/company/klc_td_sh.txt",
+    "metadata_status_counts": {
+      "L": 5574,
+      "D": 320
+    },
+    "archive_hashes_verified": true,
+    "source": "Tushare daily (SQLite + compressed historical archive)"
+  },
+  "results": [
+    {
+      "id": "limit_down_relief",
+      "name": "L1 跌停消退",
+      "regime_days": 330,
+      "periods": {
+        "development_2015_2020": {
+          "paired_cohort_count": 44,
+          "signal_count": 441,
+          "cohort_net_mean_pct": -2.42,
+          "excess_return_pct": -0.348,
+          "excess_ci_familywise95_pct": [
+            -1.323,
+            0.725
+          ],
+          "total_return_pct": -71.769,
+          "max_drawdown_pct": -73.988
+        },
+        "validation_2021_2023": {
+          "paired_cohort_count": 59,
+          "signal_count": 576,
+          "cohort_net_mean_pct": -1.059,
+          "excess_return_pct": -0.812,
+          "excess_ci_familywise95_pct": [
+            -1.835,
+            0.094
+          ],
+          "total_return_pct": -50.951,
+          "max_drawdown_pct": -54.963
+        },
+        "holdout_2024_2026": {
+          "paired_cohort_count": 49,
+          "signal_count": 475,
+          "cohort_net_mean_pct": -0.265,
+          "excess_return_pct": -0.497,
+          "excess_ci_familywise95_pct": [
+            -1.616,
+            0.603
+          ],
+          "total_return_pct": -20.39,
+          "max_drawdown_pct": -33.897
+        }
+      },
+      "promoted": false
+    },
+    {
+      "id": "limit_up_expansion",
+      "name": "L2 涨停扩散",
+      "regime_days": 61,
+      "periods": {
+        "development_2015_2020": {
+          "paired_cohort_count": 38,
+          "signal_count": 361,
+          "cohort_net_mean_pct": -0.768,
+          "excess_return_pct": -1.751,
+          "excess_ci_familywise95_pct": [
+            -3.03,
+            -0.496
+          ],
+          "total_return_pct": -30.975,
+          "max_drawdown_pct": -44.086
+        },
+        "validation_2021_2023": {
+          "paired_cohort_count": 3,
+          "signal_count": 23,
+          "cohort_net_mean_pct": 5.047,
+          "excess_return_pct": 5.32,
+          "excess_ci_familywise95_pct": null,
+          "total_return_pct": 15.766,
+          "max_drawdown_pct": -3.185
+        },
+        "holdout_2024_2026": {
+          "paired_cohort_count": 4,
+          "signal_count": 26,
+          "cohort_net_mean_pct": 2.166,
+          "excess_return_pct": -1.506,
+          "excess_ci_familywise95_pct": null,
+          "total_return_pct": 8.876,
+          "max_drawdown_pct": -3.022
+        }
+      },
+      "promoted": false
+    },
+    {
+      "id": "limit_board_reversal",
+      "name": "L3 封板翻转",
+      "regime_days": 155,
+      "periods": {
+        "development_2015_2020": {
+          "paired_cohort_count": 67,
+          "signal_count": 593,
+          "cohort_net_mean_pct": -1.369,
+          "excess_return_pct": -1.373,
+          "excess_ci_familywise95_pct": [
+            -2.4,
+            -0.32
+          ],
+          "total_return_pct": -65.606,
+          "max_drawdown_pct": -75.105
+        },
+        "validation_2021_2023": {
+          "paired_cohort_count": 26,
+          "signal_count": 196,
+          "cohort_net_mean_pct": -0.98,
+          "excess_return_pct": -1.859,
+          "excess_ci_familywise95_pct": [
+            -4.52,
+            0.601
+          ],
+          "total_return_pct": -25.418,
+          "max_drawdown_pct": -29.79
+        },
+        "holdout_2024_2026": {
+          "paired_cohort_count": 23,
+          "signal_count": 165,
+          "cohort_net_mean_pct": -0.61,
+          "excess_return_pct": -1.296,
+          "excess_ci_familywise95_pct": [
+            -3.72,
+            1.418
+          ],
+          "total_return_pct": -17.854,
+          "max_drawdown_pct": -34.212
+        }
+      },
+      "promoted": false
+    },
+    {
+      "id": "limit_up_cooling",
+      "name": "L4 强势降温",
+      "regime_days": 9,
+      "periods": {
+        "development_2015_2020": {
+          "paired_cohort_count": 7,
+          "signal_count": 80,
+          "cohort_net_mean_pct": -2.657,
+          "excess_return_pct": -0.043,
+          "excess_ci_familywise95_pct": null,
+          "total_return_pct": -19.646,
+          "max_drawdown_pct": -19.647
+        },
+        "validation_2021_2023": {
+          "paired_cohort_count": 1,
+          "signal_count": 10,
+          "cohort_net_mean_pct": 0.755,
+          "excess_return_pct": 0.727,
+          "excess_ci_familywise95_pct": null,
+          "total_return_pct": 0.755,
+          "max_drawdown_pct": -1.372
+        },
+        "holdout_2024_2026": {
+          "paired_cohort_count": 0,
+          "signal_count": 0,
+          "cohort_net_mean_pct": null,
+          "excess_return_pct": null,
+          "excess_ci_familywise95_pct": null,
+          "total_return_pct": 0.0,
+          "max_drawdown_pct": 0.0
+        }
+      },
+      "promoted": false
+    }
+  ],
+  "conclusion": "No hypothesis passed development and validation; the frozen holdout did not promote any rule."
+}
